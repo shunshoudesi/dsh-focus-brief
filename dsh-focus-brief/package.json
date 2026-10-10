@@ -1,0 +1,28 @@
+{
+  "name": "@local/dsh-focus-brief",
+  "version": "0.1.0",
+  "private": true,
+  "description": "每轮回答下方生成一张折叠的重点卡片：结论置顶、要点树状展开、过程噪声沉降；并追加一条回答格式约定。",
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js"
+  },
+  "meta": {
+    "title": "重点卡片 Focus Brief",
+    "description": "在每一轮回答下面加一张折叠卡片：最上面是结论，展开后是树状要点、需要你确认的事项和过程计数；同时让模型结论先行、不要把日志贴进正文。"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-chat",
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ]
+    }
+  }
+}

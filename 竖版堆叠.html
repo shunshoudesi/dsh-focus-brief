@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DSH 结果卡 · 总卡 + 堆叠信息块</title>
+<style>
+  :root {
+    --bg: #f0f0f0;
+    --surface: #ffffff;
+    --surface-2: #fafafa;
+    --border: #ececec;
+    --border-2: #e2e2e2;
+    --text: #141414;
+    --text-2: #6b6b6b;
+    --text-3: #a3a3a3;
+    --pill: #e0e0e0;
+    --pill-text: #565656;
+    --green: #07c160;
+    --blue: #3b82f6;
+    --amber: #e79b2c;
+    --red: #e5544b;
+    --radius: 12px;
+    --radius-lg: 16px;
+    --shadow-card: 0 1px 2px rgba(0,0,0,.04), 0 4px 14px rgba(0,0,0,.05);
+    --mono: "SFMono-Regular", "JetBrains Mono", Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0; padding: 36px 18px 80px;
+    background: var(--bg);
+    color: var(--text); font-family: var(--sans);
+    font-size: 14px; line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 540px; margin: 0 auto; }
+
+  .doc-head { margin-bottom: 24px; }
+  .doc-head .kicker {
+    display: inline-block; font-size: 11px; font-weight: 600; letter-spacing: .04em;
+    color: var(--pill-text); background: var(--surface); border-radius: 999px;
+    padding: 4px 11px; margin-bottom: 12px;
+  }
+  .doc-head h1 { font-size: 20px; margin: 0 0 6px; letter-spacing: -.01em; }
+  .doc-head p { margin: 0; font-size: 13px; color: var(--text-2); }
+
+  .section-label {
+    display: flex; align-items: center; gap: 10px;
+    margin: 32px 0 14px; font-size: 11.5px; font-weight: 600;
+    letter-spacing: .06em; color: var(--text-3); text-transform: uppercase;
+  }
+  .section-label::after { content: ""; flex: 1; height: 1px; background: #dedede; }
+  .section-label em { font-weight: 400; font-style: normal; text-transform: none; letter-spacing: 0; }
+
+  /* ================= 一条结果消息 ================= */
+  .result {
+    background: var(--surface);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-card);
+    overflow: hidden;
+  }
+
+  /* ---------- 横版总卡（常显，不可折叠） ---------- */
+  .head-card { padding: 16px 18px 14px; }
+  .head-top { display: flex; align-items: center; gap: 9px; margin-bottom: 10px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+  .d-done { background: var(--green); } .d-run { background: var(--blue); }
+  .d-wait { background: var(--amber); } .d-fail { background: var(--red); }
+  .head-title { font-size: 15px; font-weight: 650; letter-spacing: -.01em; flex: 1; min-width: 0; }
+  .head-state { font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 999px; }
+  .s-done { background: #e7f7ef; color: #0b8a4f; }
+  .s-run { background: #e9f1fe; color: #2563c9; }
+  .s-wait { background: #fdf4e4; color: #a9700f; }
+  .s-fail { background: #fdecea; color: #c03a31; }
+
+  /* 价值结论：最多两行 */
+  .head-value {
+    font-size: 15px; line-height: 1.55; color: var(--text);
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .head-value b { font-weight: 700; }
+  .head-value .hl { background: linear-gradient(transparent 62%, #ffe9a8 62%); }
+
+  /* ---------- 信息块堆叠区 ---------- */
+  .blocks { position: relative; }
+
+  /* 收起态：卡片堆叠（每张露标题行，层间轻微叠压） */
+  .blocks.deck {
+    padding: 12px 16px 16px;
+  }
+  .blocks.deck .block {
+    position: relative;
+    border-radius: 11px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    box-shadow: 0 2px 6px rgba(0,0,0,.07);
+    /* 负边距制造叠压：下一张压住上一张的底边 */
+    margin-bottom: -6px;
+    transition: transform .18s ease, box-shadow .18s ease, z-index 0s;
+  }
+  .blocks.deck .block:last-of-type { margin-bottom: 0; }
+  /* 层级：越靠上越在上层，叠压时压住下一张的顶边 */
+  .blocks.deck .block:nth-child(1) { z-index: 6; }
+  .blocks.deck .block:nth-child(2) { z-index: 5; }
+  .blocks.deck .block:nth-child(3) { z-index: 4; }
+  .blocks.deck .block:nth-child(4) { z-index: 3; }
+  .blocks.deck .block:nth-child(5) { z-index: 2; }
+  .blocks.deck .block:nth-child(n+6) { z-index: 1; }
+  /* 幽灵层：底部再垫两张缩窄的"纸边"，强化一摞卡的感觉 */
+  .blocks.deck .ghost {
+    position: relative;
+    height: 13px;
+    margin: -6px auto 0;
+    border-radius: 0 0 11px 11px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-top: none;
+    box-shadow: 0 2px 5px rgba(0,0,0,.05);
+  }
+  .blocks.deck .ghost.g1 { width: calc(100% - 20px); z-index: 0; }
+  .blocks.deck .ghost.g2 { width: calc(100% - 40px); height: 11px; margin-top: -11px; z-index: -1; }
+  .blocks.deck .block.hidden { display: block; }
+  .blocks.deck .block .body { display: none; }
+  .blocks.deck .block:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,.1); }
+  /* 若 deck 内含 .rail（从横向展开收回），强制纵向堆叠 */
+  .blocks.deck .rail { display: block; overflow: visible; }
+  .blocks.deck .rail .block {
+    width: auto; flex: none;
+    border: 1px solid var(--border);
+    border-radius: 11px;
+    box-shadow: 0 2px 6px rgba(0,0,0,.07);
+    margin-bottom: -6px;
+  }
+  .blocks.deck .rail .block:last-child { margin-bottom: 0; }
+  .blocks.deck .rail .block .body { display: none; }
+  .blocks.deck .rail .block .bl-arr { display: inline; }
+  /* 展开态隐藏"纸边"幽灵层 */
+  .blocks.expanded .ghost { display: none; }
+
+  /* 单块标题行 */
+  .block-row {
+    display: flex; align-items: center; gap: 9px;
+    padding: 11px 13px; cursor: pointer;
+    transition: background .15s ease;
+    border-radius: 9px;
+  }
+  .block-row:hover { background: var(--surface-2); }
+  .bl-ico {
+    flex: 0 0 auto; width: 22px; height: 22px; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; color: #fff;
+  }
+  .i-sum { background: #3b82f6; } .i-data { background: #7c5cf0; }
+  .i-file { background: #217346; } .i-step { background: #e79b2c; }
+  .i-warn { background: #e5544b; }
+  .bl-title { font-size: 13.5px; font-weight: 600; flex: 1; min-width: 0; }
+  .bl-count { font-size: 11.5px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+  .bl-arr { color: var(--text-3); font-size: 11px; transition: transform .2s ease; }
+
+  /* 展开入口胶囊 */
+  .blocks.deck .pill {
+    display: flex; align-items: center; justify-content: center; gap: 5px;
+    margin: 10px auto 0; width: fit-content;
+    background: var(--pill); color: var(--pill-text);
+    border: none; border-radius: 999px;
+    padding: 6px 14px; font-size: 12.5px; font-weight: 500;
+    font-family: inherit; cursor: pointer;
+    transition: background .15s ease;
+  }
+  .blocks.deck .pill:hover { background: #cfcfcf; }
+  .blocks.deck .pill .num { font-variant-numeric: tabular-nums; }
+
+  /* 展开态：横向铺开一列排开，可左右滑动 */
+  .blocks.expanded { padding: 12px 14px 14px; }
+  .blocks.expanded .rail {
+    display: flex; gap: 10px;
+    overflow-x: auto; overflow-y: hidden;
+    padding-bottom: 6px;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+  }
+  .blocks.expanded .rail::-webkit-scrollbar { height: 4px; }
+  .blocks.expanded .rail::-webkit-scrollbar-track { background: #efefef; border-radius: 2px; }
+  .blocks.expanded .rail::-webkit-scrollbar-thumb { background: #c9c9c9; border-radius: 2px; }
+
+  .blocks.expanded .block {
+    flex: 0 0 232px;
+    width: 232px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.05);
+    scroll-snap-align: start;
+    display: flex; flex-direction: column;
+  }
+  .blocks.expanded .block.hidden { display: flex; }
+  .blocks.expanded .block .block-row { cursor: default; }
+  .blocks.expanded .block .block-row:hover { background: transparent; }
+  .blocks.expanded .block .bl-arr { display: none; }
+  .blocks.expanded .block .body { display: block; border-top: 1px solid var(--border); padding: 11px 12px; flex: 1; }
+
+  /* 展开态保留「收起」按钮 */
+  .blocks.expanded .pill {
+    display: flex; align-items: center; justify-content: center; gap: 5px;
+    margin: 10px auto 0; width: fit-content;
+    background: var(--pill); color: var(--pill-text);
+    border: none; border-radius: 999px;
+    padding: 6px 14px; font-size: 12.5px; font-weight: 500;
+    font-family: inherit; cursor: pointer; transition: background .15s ease;
+  }
+  .blocks.expanded .pill:hover { background: #cfcfcf; }
+
+  /* 截断提示：前几项 + "还有 N 个 ›" */
+  .more-link {
+    display: flex; align-items: center; justify-content: center; gap: 4px;
+    margin-top: 8px; padding: 7px;
+    background: var(--surface-2); border-radius: 8px;
+    font-size: 12px; font-weight: 600; color: #2563c9;
+    cursor: pointer; border: none; width: 100%; font-family: inherit;
+  }
+  .more-link:hover { background: #f0f0f0; }
+  /* 被截断的隐藏项 */
+  .truncated { display: none; }
+  .block.show-all .truncated { display: flex; }
+  .block.show-all .more-link { display: none; }
+
+  /* 信息块内容样式 */
+  .body .kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px,1fr)); gap: 8px; }
+  .body .kv > div { background: var(--surface-2); border-radius: 8px; padding: 9px 11px; }
+  .body .kv .k { font-size: 11px; color: var(--text-3); }
+  .body .kv .v { font-size: 16px; font-weight: 700; margin-top: 1px; }
+  .body p { margin: 0 0 8px; font-size: 13.5px; }
+  .body p:last-child { margin-bottom: 0; }
+
+  .file-row {
+    display: flex; align-items: center; gap: 9px;
+    padding: 8px 10px; border-radius: 8px; background: var(--surface-2);
+    margin-bottom: 6px; font-size: 13px;
+  }
+  .file-row:last-child { margin-bottom: 0; }
+  .file-row .fi { width: 24px; height: 24px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 8.5px; font-weight: 700; color: #fff; flex: 0 0 auto; }
+  .file-row .fn { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .file-row .fs { font-size: 11px; color: var(--text-3); }
+
+  .steps { position: relative; padding-left: 18px; }
+  .steps::before { content: ""; position: absolute; left: 4px; top: 6px; bottom: 6px; width: 2px; background: var(--border-2); }
+  .step { position: relative; padding: 2px 0 10px; font-size: 13px; }
+  .step:last-child { padding-bottom: 0; }
+  .step::before { content: ""; position: absolute; left: -18px; top: 7px; width: 10px; height: 10px; border-radius: 50%; background: var(--surface); border: 2px solid #d5d5d5; }
+  .step.done::before { background: var(--green); border-color: var(--green); }
+  .step.active::before { background: var(--blue); border-color: var(--blue); box-shadow: 0 0 0 3px #e9f1fe; }
+  .step .d { font-size: 12px; color: var(--text-3); }
+
+  .note { display: flex; gap: 8px; font-size: 13px; padding: 10px 12px; border-radius: 9px; background: #fdecea; color: #a5301f; }
+
+  /* 底部元信息 */
+  .foot {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 18px; border-top: 1px solid var(--border);
+    font-size: 11.5px; color: var(--text-3);
+  }
+  .foot .acts { display: flex; gap: 8px; }
+  .btn {
+    font-size: 12px; font-weight: 600; padding: 7px 12px; border-radius: 8px;
+    border: 1px solid #dcdcdc; background: var(--surface); color: var(--text-2);
+    cursor: pointer; font-family: inherit;
+  }
+  .btn:hover { background: #f5f5f5; color: var(--text); }
+  .btn.primary { background: #141414; border-color: #141414; color: #fff; }
+  .btn.primary:hover { background: #000; }
+
+  .footer-note { text-align: center; font-size: 11px; color: var(--text-3); margin-top: 38px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="doc-head">
+    <span class="kicker">◆ DSH · 总卡 + 堆叠信息块</span>
+    <h1>横版总卡 + 堆叠信息块</h1>
+    <p>总卡常显（标题 + 一句价值结论，最多两行）；下面一摞信息块堆叠在一起（每张露标题行、层间轻微叠压），点「展开 N」横向铺开可左右滑动、每张卡内容截断后点进看全部。</p>
+  </div>
+
+  <!-- ============ 示例 1：收起态（卡片堆叠） ============ -->
+  <div class="section-label">01 · 收起态 <em>卡片堆叠在一起（层间轻微叠压）</em></div>
+
+  <div class="result">
+    <div class="head-card">
+      <div class="head-top">
+        <span class="dot d-done"></span>
+        <span class="head-title">生成秋招投递资料包</span>
+        <span class="head-state s-done">完成</span>
+      </div>
+      <div class="head-value">
+        已筛出 <b>142 家</b>北京在招岗位并排好三批投递顺序，产出 <b>8 个</b>可直接使用的文件。
+      </div>
+    </div>
+
+    <div class="blocks deck" id="deck1">
+      <div class="block">
+        <div class="block-row">
+          <span class="bl-ico i-data">▤</span>
+          <span class="bl-title">关键数据</span>
+          <span class="bl-count">4 项</span>
+          <span class="bl-arr">›</span>
+        </div>
+      </div>
+      <div class="block">
+        <div class="block-row">
+          <span class="bl-ico i-file">▦</span>
+          <span class="bl-title">产出文件</span>
+          <span class="bl-count">8 个</span>
+          <span class="bl-arr">›</span>
+        </div>
+      </div>
+      <div class="block">
+        <div class="block-row">
+          <span class="bl-ico i-step">◷</span>
+          <span class="bl-title">执行过程</span>
+          <span class="bl-count">5 步</span>
+          <span class="bl-arr">›</span>
+        </div>
+      </div>
+      <div class="block">
+        <div class="block-row"><span class="bl-ico i-sum">◆</span><span class="bl-title">结论建议</span><span class="bl-count">2 条</span><span class="bl-arr">›</span></div>
+      </div>
+      <div class="block">
+        <div class="block-row"><span class="bl-ico i-warn">!</span><span class="bl-title">风险提醒</span><span class="bl-count">1 条</span><span class="bl-arr">›</span></div>
+      </div>
+      <div class="ghost g1"></div>
+      <div class="ghost g2"></div>
+      <button class="pill" type="button" data-target="deck1">展开 <span class="num">5</span> 个信息块</button>
+    </div>
+
+    <div class="foot">
+      <span>outputs/ · 22:38</span>
+      <div class="acts">
+        <button class="btn">全部下载</button>
+        <button class="btn primary">继续追问 ›</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 示例 2：展开态（横向铺开） ============ -->
+  <div class="section-label">02 · 展开态 <em>横向铺开，可左右滑动；点「收起」回到纵向单列</em></div>
+
+  <div class="result">
+    <div class="head-card">
+      <div class="head-top">
+        <span class="dot d-done"></span>
+        <span class="head-title">生成秋招投递资料包</span>
+        <span class="head-state s-done">完成</span>
+      </div>
+      <div class="head-value">
+        已筛出 <b>142 家</b>北京在招岗位并排好三批投递顺序，产出 <b>8 个</b>可直接使用的文件。
+      </div>
+    </div>
+
+    <div class="blocks expanded" id="deck2">
+      <div class="rail">
+      <div class="block open">
+        <div class="block-row"><span class="bl-ico i-data">▤</span><span class="bl-title">关键数据</span><span class="bl-count">4 项</span><span class="bl-arr">›</span></div>
+        <div class="body">
+          <div class="kv">
+            <div><div class="k">目标公司</div><div class="v">142</div></div>
+            <div><div class="k">岗位总数</div><div class="v">386</div></div>
+            <div><div class="k">匹配度≥80%</div><div class="v">57</div></div>
+            <div><div class="k">建议首批</div><div class="v">30</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="block open">
+        <div class="block-row"><span class="bl-ico i-file">▦</span><span class="bl-title">产出文件</span><span class="bl-count">8 个</span><span class="bl-arr">›</span></div>
+        <div class="body">
+          <div class="file-row"><span class="fi" style="background:#217346">XLS</span><span class="fn">投递计划表.xlsx</span><span class="fs">86 KB</span></div>
+          <div class="file-row"><span class="fi" style="background:#2b579a">DOC</span><span class="fn">简历定制版.docx</span><span class="fs">42 KB</span></div>
+          <div class="file-row"><span class="fi" style="background:#c0392b">PDF</span><span class="fn">话术应对手册.pdf</span><span class="fs">1.2 MB</span></div>
+          <div class="file-row truncated"><span class="fi" style="background:#7a5af5">PNG</span><span class="fn">匹配度分布图.png</span><span class="fs">240 KB</span></div>
+          <div class="file-row truncated"><span class="fi" style="background:#2b579a">DOC</span><span class="fn">自荐信模板.docx</span><span class="fs">28 KB</span></div>
+          <div class="file-row truncated"><span class="fi" style="background:#c0392b">PDF</span><span class="fn">岗位分析.pdf</span><span class="fs">960 KB</span></div>
+          <div class="file-row truncated"><span class="fi" style="background:#217346">XLS</span><span class="fn">公司清单.xlsx</span><span class="fs">64 KB</span></div>
+          <div class="file-row truncated"><span class="fi" style="background:#217346">XLS</span><span class="fn">投递日程表.xlsx</span><span class="fs">52 KB</span></div>
+          <button class="more-link" type="button">还有 5 个 <span>›</span></button>
+        </div>
+      </div>
+
+      <div class="block open">
+        <div class="block-row"><span class="bl-ico i-step">◷</span><span class="bl-title">执行过程</span><span class="bl-count">5 步</span><span class="bl-arr">›</span></div>
+        <div class="body">
+          <div class="steps">
+            <div class="step done"><div>读取投递偏好配置</div><div class="d">地域=北京</div></div>
+            <div class="step done"><div>抓取在招岗位列表</div><div class="d">共 386 条</div></div>
+            <div class="step done"><div>清洗与去重</div><div class="d">剔除 41 条</div></div>
+            <div class="step done truncated"><div>计算匹配度</div><div class="d">技术栈/项目/届别</div></div>
+            <div class="step done truncated"><div>生成资料包</div><div class="d">输出 8 个文件</div></div>
+          </div>
+          <button class="more-link" type="button">还有 2 步 <span>›</span></button>
+        </div>
+      </div>
+
+      <div class="block open">
+        <div class="block-row"><span class="bl-ico i-sum">◆</span><span class="bl-title">结论建议</span><span class="bl-count">2 条</span><span class="bl-arr">›</span></div>
+        <div class="body">
+          <p>① 不要等简历完全改好再投，本周内先投 30 家匹配度 ≥ 80% 的岗位占位。</p>
+          <p>② 简历在第 2 批前完成迭代，重点补项目量化数据。</p>
+        </div>
+      </div>
+
+      <div class="block open">
+        <div class="block-row"><span class="bl-ico i-warn">!</span><span class="bl-title">风险提醒</span><span class="bl-count">1 条</span><span class="bl-arr">›</span></div>
+        <div class="body">
+          <div class="note"><span>⚠</span><div>零实习经历是最大短板，首批已剔除 12 家有实习硬门槛的岗位。</div></div>
+        </div>
+      </div>
+      </div>
+
+      <button class="pill" type="button" data-target="deck2">收起</button>
+    </div>
+
+    <div class="foot">
+      <span>outputs/ · 22:38</span>
+      <div class="acts">
+        <button class="btn">全部下载</button>
+        <button class="btn primary">继续追问 ›</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="section-label">03 · 非完成态 <em>不叠、直接展开（F1）</em></div>
+
+  <!-- 进行中 -->
+  <div class="result" style="margin-bottom:14px">
+    <div class="head-card">
+      <div class="head-top">
+        <span class="dot d-run"></span>
+        <span class="head-title">抓取并清洗岗位数据</span>
+        <span class="head-state s-run">进行中 3/5</span>
+      </div>
+      <div class="head-value">正在清洗第 3 批数据，已处理 <b>1,240 条</b>，预计还需 <b>40 秒</b>。</div>
+    </div>
+    <div class="blocks expanded" style="padding:0 16px 14px">
+      <div class="rail" style="overflow:visible">
+        <div class="block open" style="flex:0 0 100%;width:100%">
+          <div class="block-row"><span class="bl-ico i-step">◷</span><span class="bl-title">执行过程</span><span class="bl-count">3 / 5</span></div>
+          <div class="body">
+            <div class="steps">
+              <div class="step done"><div>读取投递偏好配置</div><div class="d">地域=北京 · 岗位=Java后端/AI应用</div></div>
+              <div class="step done"><div>抓取在招岗位列表</div><div class="d">共获取 386 条</div></div>
+              <div class="step active"><div>清洗与去重</div><div class="d">第 3 批 · 已剔除 41 条</div></div>
+              <div class="step"><div>计算匹配度</div><div class="d">待执行</div></div>
+              <div class="step"><div>生成资料包</div><div class="d">待执行</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="foot">
+      <span>job-20261010-2247</span>
+      <div class="acts"><button class="btn">暂停</button><button class="btn">查看日志</button></div>
+    </div>
+  </div>
+
+  <!-- 待确认 -->
+  <div class="result" style="margin-bottom:14px">
+    <div class="head-card">
+      <div class="head-top">
+        <span class="dot d-wait"></span>
+        <span class="head-title">岗位数据去重</span>
+        <span class="head-state s-wait">待确认</span>
+      </div>
+      <div class="head-value">有 <b>3 家公司</b>在不同渠道重复抓取且字段冲突，需要你选择保留策略才能继续。</div>
+    </div>
+    <div class="blocks expanded" style="padding:0 16px 14px">
+      <div class="rail" style="overflow:visible">
+        <div class="block open" style="flex:0 0 100%;width:100%">
+          <div class="block-row"><span class="bl-ico i-warn">!</span><span class="bl-title">冲突明细</span><span class="bl-count">3 项</span></div>
+          <div class="body">
+            <div class="note" style="background:#fdf6e8;color:#8a5d12"><span>⚠</span><div>字节跳动（截止日期）、美团（薪资区间）、京东（可否转正）字段冲突。</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="foot">
+      <span>需要你选择</span>
+      <div class="acts"><button class="btn">保留 A</button><button class="btn">保留 B</button><button class="btn primary">两者都保留</button></div>
+    </div>
+  </div>
+
+  <!-- 失败 -->
+  <div class="result" style="margin-bottom:14px">
+    <div class="head-card">
+      <div class="head-top">
+        <span class="dot d-fail"></span>
+        <span class="head-title">导出 PDF 手册</span>
+        <span class="head-state s-fail">失败</span>
+      </div>
+      <div class="head-value">目标目录被占用，写入 <b>投递话术手册.pdf</b> 失败；前 3 步结果已缓存，可修复后重试。</div>
+    </div>
+    <div class="blocks expanded" style="padding:0 16px 14px">
+      <div class="rail" style="overflow:visible">
+        <div class="block open" style="flex:0 0 100%;width:100%">
+          <div class="block-row"><span class="bl-ico i-warn">✕</span><span class="bl-title">错误日志</span><span class="bl-count">1 条</span></div>
+          <div class="body">
+            <div class="note"><span>✕</span><div>PermissionError: [WinError 32] 另一个程序正在使用此文件 → 占用进程 WINWORD.EXE (PID 11784)</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="foot">
+      <span>失败于第 4/5 步 · 48s</span>
+      <div class="acts"><button class="btn">完整日志</button><button class="btn primary">修复后重试</button></div>
+    </div>
+  </div>
+
+  <div class="section-label">04 · 边界情况 <em>F2 / F3：退化与平铺</em></div>
+
+  <!-- F2：无信息块，退化为普通消息 -->
+  <div class="result" style="margin-bottom:14px">
+    <div class="head-card" style="padding-bottom:16px">
+      <div class="head-top" style="margin-bottom:8px">
+        <span class="dot d-done"></span>
+        <span class="head-title">投递节奏建议</span>
+        <span class="head-state s-done">完成</span>
+      </div>
+      <div class="head-value">建议本周内先投 <b>30 家</b>匹配度 ≥ 80% 的岗位占位，简历在第 2 批前完成迭代。</div>
+    </div>
+  </div>
+
+  <!-- F3：仅 2 块，平铺不叠 -->
+  <div class="result">
+    <div class="head-card">
+      <div class="head-top">
+        <span class="dot d-done"></span>
+        <span class="head-title">简历诊断</span>
+        <span class="head-state s-done">完成</span>
+      </div>
+      <div class="head-value">综合评分 <b>78 / 100</b>，短板集中在零实习经历与项目量化不足。</div>
+    </div>
+    <div class="blocks expanded" style="padding:0 16px 14px">
+      <div class="rail" style="overflow:visible">
+        <div class="block open" style="flex:0 0 calc(50% - 5px);width:calc(50% - 5px)">
+          <div class="block-row"><span class="bl-ico i-data">▤</span><span class="bl-title">关键数据</span><span class="bl-count">2 项</span></div>
+          <div class="body">
+            <div class="kv" style="grid-template-columns:1fr 1fr">
+              <div><div class="k">综合评分</div><div class="v">78</div></div>
+              <div><div class="k">短板项</div><div class="v">2</div></div>
+            </div>
+          </div>
+        </div>
+        <div class="block open" style="flex:0 0 calc(50% - 5px);width:calc(50% - 5px)">
+          <div class="block-row"><span class="bl-ico i-sum">◆</span><span class="bl-title">改进建议</span><span class="bl-count">2 条</span></div>
+          <div class="body">
+            <p style="font-size:12.5px">① 项目经历补量化指标<br>② 突出可到岗时间优势</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="foot">
+      <span>2 个信息块 · 不叠平铺</span>
+      <div class="acts"><button class="btn">查看完整报告</button></div>
+    </div>
+  </div>
+
+  <div class="footer-note">F1 非完成态不叠直接展开 · F2 无信息块退化为普通消息 · F3 仅 1~2 块平铺不叠</div>
+</div>
+
+<script>
+(function () {
+  // 展开/收起整个信息块区（可反复切换）
+  document.querySelectorAll('.blocks').forEach(function (box) {
+    var pill = box.querySelector('.pill');
+    if (!pill) return;                 // 非完成态 / 边界情况无 pill，不参与切换
+    var blocks = box.querySelectorAll('.block');
+    var total = blocks.length;
+
+    pill.addEventListener('click', function () {
+      var isDeck = box.classList.contains('deck');
+      if (isDeck) {
+        // 收起态（纵向单列）→ 横向展开
+        box.classList.remove('deck');
+        box.classList.add('expanded');
+        Array.prototype.forEach.call(blocks, function (b) {
+          b.classList.add('open');
+        });
+        pill.innerHTML = '收起';
+      } else {
+        // 横向展开 → 收回到纵向单列
+        box.classList.remove('expanded');
+        box.classList.add('deck');
+        Array.prototype.forEach.call(blocks, function (b) {
+          b.classList.remove('open');
+        });
+        pill.innerHTML = '展开 <span class="num">' + total + '</span> 个信息块';
+      }
+    });
+  });
+
+  // 「还有 N 个 ›」：展开被截断的项
+  document.querySelectorAll('.more-link').forEach(function (btn) {
+    btn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      var block = btn.closest('.block');
+      if (!block) return;
+      block.classList.add('show-all');
+    });
+  });
+})();
+</script>
+</body>
+</html>
