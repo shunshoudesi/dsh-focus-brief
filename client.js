@@ -673,17 +673,15 @@ const HEADLINE_LINE_TARGET = 2;
               ? null
               : h('span', { className: 'dfb-count', 'data-alert': 'true' }, t('card.countAsks', { count: asks.length })),
           );
-      const toggle = h(
-        'button',
-        {
-          type: 'button',
-          className: 'dfb-toggle',
-          'aria-expanded': open,
-          'aria-label': open ? t('card.collapse') : t('card.expand'),
-          onClick: () => setOpen((value) => !value),
-        },
-        open ? '▾' : '▸',
-      );
+      // 展开按钮：**只有一个小箭头**（无文字）。试过写「展开重点」四个字，在 760px 的取证页上直接被挤出卡片——
+// 普通对话视图里这张卡本来就窄，右侧多一个字就够把结论挤成两行。
+      const toggle = h('button', {
+        type: 'button',
+        className: 'dfb-toggle',
+        'aria-expanded': open,
+        'aria-label': open ? t('card.collapse') : t('card.expand'),
+        onClick: () => setOpen((value) => !value),
+      });
 
       const body = open
         ? h(
@@ -723,45 +721,62 @@ const HEADLINE_LINE_TARGET = 2;
       return h(
         'div',
         { className: 'dfb-card', 'data-focus-brief': brief.turn },
-        h('div', { className: 'dfb-head' }, h('span', { className: 'dfb-badge' }, t('card.badge')), h('span', { className: 'dfb-headline' }, headline), counts, toggle),
+        // 标题行：小圆点（装饰）+ 一句结论 + 折叠态计数 + 展开按钮。**都不带框**——
+        // 原先那个「重点」胶囊和带边框的「待定 N」是这张卡最花的两处，重做时整条删掉。
+        h('div', { className: 'dfb-head' }, h('span', { className: 'dfb-mark', 'aria-hidden': 'true' }), h('span', { className: 'dfb-headline' }, headline), counts, toggle),
         body,
       );
     }
 
-    /** v1 的样式（与 v2 一起注入，前缀不同互不影响）。 */
+    /**
+     * v1 的样式（与 v2 一起注入，前缀不同互不影响）。
+     *
+     * 这一版是**重做的「简约大气」**：用户看过一眼就要求改。原先那版是毛玻璃
+     * （`backdrop-filter:blur(20px)` + 半透明底 + 顶部渐层 + 内高光 + 「重点」胶囊 + 「待定 N」带框胶囊），
+     * 信息在四五个小圆角框里打架。现在照 v2 那张卡的语汇重排：
+     * - **一个实底面 + 一条发丝边 + 一层极轻投影**（v2 的写法），去掉 blur / 渐层 / 内高光；
+     * - 标题行只做三件事：一个小圆点（品牌色，纯装饰）+ 一句结论 + 一个展开按钮，**都不带框**；
+     * - 「待定 N」只在真有事要拍板时出现，且是**无色相的软底**——warn 色只用来点圆点，
+     *   不用来写字（实测 `#f59e0b` 当文字在浅色主题下只有 2.15:1）。
+     */
     const BRIEF_CSS = [
-      '.dfb-card{box-sizing:border-box;margin-top:10px;border:1px solid var(--dsw-alias-border-l2);border-radius:14px;background-color:var(--dsw-alias-bg-layer-1);background-image:none;overflow:hidden;box-shadow:0 6px 20px rgba(0,0,0,.10)}',
-      '.dfb-head{display:flex;align-items:flex-start;gap:8px;padding:10px 12px}',
-      '.dfb-badge{flex:none;font-size:11px;line-height:18px;padding:0 7px;border-radius:999px;color:var(--dsw-alias-brand-primary);border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-2)}',
-      '.dfb-headline{flex:1 1 auto;min-width:0;font-size:13px;line-height:19px;color:var(--dsw-alias-label-primary);overflow-wrap:anywhere}',
-      '.dfb-counts{flex:none;display:inline-flex;align-items:center;gap:6px;padding-top:1px;font-size:11px;line-height:18px;color:var(--dsw-alias-label-secondary)}',
-      '.dfb-count[data-alert="true"]{color:var(--dsw-alias-label-primary);padding:0 6px;border-radius:999px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-2)}',
-      '.dfb-toggle{flex:none;width:26px;height:26px;margin:-2px -4px 0 0;border:0;padding:0;border-radius:999px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;font-size:12px;line-height:26px;transition:background-color .15s ease,color .15s ease}',
+      /* ---------- 卡面 ---------- */
+      '.dfb-card{box-sizing:border-box;margin-top:10px;background-color:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l2);border-radius:14px;box-shadow:0 1px 2px rgba(0,0,0,.04),0 4px 14px rgba(0,0,0,.06);overflow:hidden}',
+      /* ---------- 标题行：一句结论 + 计数 + 展开 ---------- */
+      '.dfb-head{display:flex;align-items:flex-start;gap:9px;padding:12px 14px}',
+      /* 小圆点：纯装饰（8px 实心圆，和 v2 状态点同尺寸），让「重点」两个字闭嘴也能认出这是重点卡。 */
+      '.dfb-mark{flex:none;width:8px;height:8px;margin-top:5px;border-radius:50%;background-color:var(--dsw-alias-brand-primary)}',
+      '.dfb-headline{flex:1 1 auto;min-width:0;font-size:13.5px;line-height:20px;font-weight:500;color:var(--dsw-alias-label-primary);overflow-wrap:anywhere}',
+      '.dfb-counts{flex:none;display:inline-flex;align-items:center;gap:6px;margin-top:1px;font-size:11px;line-height:18px;color:var(--dsw-alias-label-secondary);white-space:nowrap}',
+      /* 要你拍板那一个：软底、无边框、字仍是主文字色（warn 只用来给圆点上色）。
+         先给一条**不含 color-mix** 的兜底（引擎不支持时只是没有底色，字照样清楚），再给带色相的那条。 */
+      '.dfb-count[data-alert="true"]{color:var(--dsw-alias-label-primary);padding:0 7px;border-radius:7px;background:var(--dsw-alias-bg-layer-2)}',
+      '.dfb-count[data-alert="true"]{background:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 14%,transparent)}',
+      '.dfb-toggle{flex:none;position:relative;width:24px;height:24px;margin:-2px -5px 0 0;border:0;padding:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;transition:background-color .15s ease,color .15s ease}',
       '.dfb-toggle:hover{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}',
       '.dfb-toggle:active{background:var(--dsw-alias-bg-layer-2)}',
-      '.dfb-toggle:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}',
-      '.dfb-body{display:flex;flex-direction:column;gap:9px;padding:0 12px 12px}',
-      '.dfb-label{font-size:11px;line-height:16px;color:var(--dsw-alias-label-secondary);margin-bottom:3px}',
-      '.dfb-quote{font-size:12px;line-height:19px;color:var(--dsw-alias-label-secondary);border-left:2px solid var(--dsw-alias-border-l2);padding-left:9px;overflow-wrap:anywhere}',
+      '.dfb-toggle:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}',
+      /* 箭头用 CSS 生成（`˅` 是文字字形，跟随 currentColor，不引图标依赖），展开时翻过来。 */
+      '.dfb-toggle:before{content:"˅";position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:14px;line-height:1;transform:translateY(-1px);transition:transform .15s ease}',
+      '.dfb-toggle[aria-expanded="true"]:before{transform:translateY(1px) rotate(180deg)}',
+      /* ---------- 展开体：一条分隔线把它和标题分开 ---------- */
+      '.dfb-body{display:flex;flex-direction:column;gap:10px;padding:12px 14px 13px;border-top:1px solid var(--dsw-alias-border-l2)}',
+      '.dfb-label{font-size:11px;line-height:16px;font-weight:500;color:var(--dsw-alias-label-secondary);margin-bottom:4px}',
+      '.dfb-quote{margin:0;font-size:12px;line-height:19px;color:var(--dsw-alias-label-secondary);border-left:2px solid var(--dsw-alias-border-l2);padding-left:9px;overflow-wrap:anywhere}',
       '.dfb-tree,.dfb-asks{margin:0;padding:0;list-style:none}',
       '.dfb-item{font-size:12px;line-height:19px;color:var(--dsw-alias-label-primary);overflow-wrap:anywhere}',
       '.dfb-item:before{content:"·";color:var(--dsw-alias-label-secondary);margin-right:6px}',
-      '.dfb-asks .dfb-item{color:var(--dsw-alias-label-primary)}',
+      /* 要拍板的那几条：圆点用 warn 色，字仍是主文字色（同前：warn 不当文字色）。 */
       '.dfb-asks .dfb-item:before{color:var(--dsw-alias-state-warn-primary)}',
-      '.dfb-meta{font-size:11px;line-height:16px;color:var(--dsw-alias-label-secondary)}',
+      '.dfb-meta{margin-top:1px;font-size:11px;line-height:16px;color:var(--dsw-alias-label-secondary)}',
       '@supports (color:color-mix(in srgb,red 50%,transparent)){',
-      '.dfb-card{background-color:color-mix(in srgb,color-mix(in srgb,var(--dsw-alias-bg-layer-1) 92%,var(--dsw-alias-label-primary)) 72%,transparent);background-image:linear-gradient(color-mix(in srgb,var(--dsw-alias-label-primary) 5%,transparent),transparent 45%);box-shadow:0 6px 20px rgba(0,0,0,.10),inset 0 1px 0 color-mix(in srgb,var(--dsw-alias-label-primary) 8%,transparent)}',
-      '.dfb-badge{border-color:color-mix(in srgb,var(--dsw-alias-brand-primary) 32%,transparent);background:color-mix(in srgb,var(--dsw-alias-brand-primary) 10%,transparent)}',
-      '.dfb-count[data-alert="true"]{border-color:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 45%,transparent);background:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 12%,transparent)}',
-      '.dfb-toggle:hover{background:color-mix(in srgb,var(--dsw-alias-label-primary) 8%,transparent);color:var(--dsw-alias-label-primary)}',
-      '.dfb-toggle:active{background:color-mix(in srgb,var(--dsw-alias-label-primary) 14%,transparent)}',
-      '.dfb-quote{border-left-color:color-mix(in srgb,var(--dsw-alias-brand-primary) 45%,transparent)}',
+      '.dfb-toggle:hover{background:color-mix(in srgb,var(--dsw-alias-label-primary) 6%,transparent);color:var(--dsw-alias-label-primary)}',
+      '.dfb-toggle:active{background:color-mix(in srgb,var(--dsw-alias-label-primary) 11%,transparent)}',
+      '.dfb-quote{border-left-color:color-mix(in srgb,var(--dsw-alias-brand-primary) 40%,transparent)}',
       '}',
-      '@supports (backdrop-filter:blur(1px)){',
-      '.dfb-card{-webkit-backdrop-filter:blur(20px) saturate(180%);backdrop-filter:blur(20px) saturate(180%)}',
-      '}',
-      '@media (forced-colors:active){.dfb-card{background:Canvas;border-color:CanvasText;box-shadow:none;-webkit-backdrop-filter:none;backdrop-filter:none}.dfb-badge,.dfb-count[data-alert="true"]{border-color:CanvasText}}',
-      '@media (prefers-reduced-motion:reduce){.dfb-toggle{transition:none}}',
+      /* 系统强制色：把装饰收干净，只留边框与文字。 */
+      '@media (forced-colors:active){.dfb-card{background:Canvas;border-color:CanvasText;box-shadow:none}.dfb-mark{background:CanvasText}}',
+      '@media (prefers-reduced-motion:reduce){.dfb-toggle,.dfb-toggle:before{transition:none}}',
     ].join('');
 
     /* ==================================================================== */

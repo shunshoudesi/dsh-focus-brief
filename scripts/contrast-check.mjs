@@ -129,9 +129,14 @@ for (const [index, scope] of scopes.entries()) {
   }
 
   const checks = [
-    // ---- v1：普通对话视图里那张毛玻璃小卡（沿用既有阈值） ----
-    ['v1 结论文字 (label-primary 在卡上)', label, over([layer1[0], layer1[1], layer1[2], 0.72], base), 4.5],
-    ['v1 次要文字 (label-secondary 在卡上)', secondary, over([layer1[0], layer1[1], layer1[2], 0.72], base), 4.5],
+    // ---- v1：普通对话视图里那张小卡 ----
+    // 2026-10 重做成实底卡（原来是毛玻璃 + 半透明底，所以旧断言把卡面折成了 layer1 72% 叠在页面底上）。
+    // 现在卡面就是 layer1 本身，于是 v1/v2 两边的算式一致；新增两条覆盖重做带进来的元素：
+    // 「待定 N」那个软底小片，以及标题行那枚品牌色圆点（按图形 3:1）。
+    ['v1 结论文字 (label-primary 在卡面)', label, layer1, 4.5],
+    ['v1 次要文字 (label-secondary 在卡面)', secondary, layer1, 4.5],
+    ['v1 标题行小圆点 (brand 在卡面)', brand, layer1, 3],
+    ['v1「待定 N」小片文字 (label-primary 在 14% warn 软底上)', label, tint(warn, 0.14), 4.5],
     // ---- v2：专注视图 ----
     ['v2 标题／结论文字 (label-primary 在卡面)', label, layer1, 4.5],
     // 用户提问气泡：底色就是官方对话那条气泡自己的 token（浅色 #edf3fe / 深色 #2c2c2e），字色是 label-primary。

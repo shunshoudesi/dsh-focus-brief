@@ -129,11 +129,15 @@ console.log(`解析到 ${rules.length} 条规则`);
 
 // ---------- 5. 要素与退回 ----------
 const must = [
-  // v1（普通对话视图里那张小卡）
-  ['v1 半透明底（从 token 派生并掺了 label 色）', /background-color:color-mix\(in srgb,color-mix\(in srgb,var\(--dsw-alias-bg-layer-1\)/],
-  ['v1 顶部渐隐光泽', /background-image:linear-gradient\(color-mix\(in srgb,var\(--dsw-alias-label-primary\)/],
-  ['v1 背景模糊', /backdrop-filter:blur\(20px\) saturate\(180%\)/],
-  ['v1 顶部内高光', /inset 0 1px 0 color-mix\(/],
+  // v1（普通对话视图里那张小卡）——2026-10 按用户要求重做成「简约大气」，所以这里要的不再是毛玻璃，
+  // 而是「和 v2 同一套语汇」：实底面 + 发丝边 + 两层柔和投影 + 一个装饰圆点。
+  // （旧的四条要素断言——半透明底 / 顶部渐隐 / blur(20px) / 内高光——随重做一起删了；
+  //   同时在下一条禁令里**禁止**它们回来，见「5b」。）
+  ['v1 实底卡面用主题面色', /\.dfb-card\{[^}]*background-color:var\(--dsw-alias-bg-layer-1\)/],
+  ['v1 发丝边直接用 token 自带的 alpha', /\.dfb-card\{[^}]*border:1px solid var\(--dsw-alias-border-l2\)/],
+  ['v1 柔和投影（与 v2 同款两层）', /\.dfb-card\{[^}]*box-shadow:0 1px 2px rgba\(0,0,0,\.04\),0 4px 14px rgba\(0,0,0,\.06\)/],
+  ['v1 标题行有装饰圆点', /\.dfb-mark\{[^}]*border-radius:50%/],
+  ['v1 展开体与标题行之间有分隔线', /\.dfb-body\{[^}]*border-top:1px solid var\(--dsw-alias-border-l2\)/],
   // v2（专注视图）
   ['v2 实底卡面用主题面色', /\.dfv-card\{[^}]*background-color:var\(--dsw-alias-bg-layer-1\)/],
   ['v2 发丝边直接用 token 自带的 alpha', /\.dfv-card\{[^}]*border:1px solid var\(--dsw-alias-border-l2\)/],
@@ -188,6 +192,10 @@ for (const [label, pattern] of [
   // 连 SSR 的「文字在 HTML 里」断言都查不出来——只有 CSS 这一层能钉住它。
   ['结论行的两行截断（.dfv-value 不该有 line-clamp / box-orient）', /\.dfv-value\{[^}]*(?:line-clamp|box-orient)/],
   ['结论行的隐藏溢出（.dfv-value 不该有 overflow:hidden）', /\.dfv-value\{[^}]*overflow:\s*hidden/],
+  // v1 那张小卡**不许再回到毛玻璃**：用户看完一眼就说「样式修改一下，简约大气」，
+  // 而它原先正是 blur(20px) + 半透明底 + 顶部渐隐 + 内高光那一套。重做后这一条守着它别回来。
+  ['v1 背景模糊（.dfb-* 不该有 backdrop-filter）', /\.dfb-[a-z-]+\{[^}]*backdrop-filter/],
+  ['v1 半透明底与渐层（.dfb-card 不该有半透明色或渐变图）', /\.dfb-card\{[^}]*background-(?:color:color-mix|image:linear-gradient)/],
 ]) {
   if (pattern.test(css)) problems.push(`${label}又出现在样式里了`);
 }

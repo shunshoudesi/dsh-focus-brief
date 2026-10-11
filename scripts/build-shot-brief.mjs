@@ -1,0 +1,183 @@
+/**
+ * 肉眼取证：把 **v1 那张小卡**（普通对话视图里的重点卡）渲染成单卡页面，供截图。
+ *
+ * 为什么单独一个脚本：`build-shot-pages.mjs` 造的是 v2（专注视图）的卡，
+ * 而用户这次要求改的是 v1 的样式（「这个模块的样式修改一下，简约大气」）。
+ * 改样式这件事**只有肉眼能验**——断言能证明「规则在不在」，证明不了「读起来像不像样」。
+ *
+ * 出两个形态 × 两套主题：折叠态、展开态。
+ * 用法: node scripts/build-shot-brief.mjs
+ */
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { readSessionEvents } from './zstd-frames.mjs';
+import { ROOT, REACT_DIR as dir, themeSource } from './_paths.mjs';
+
+function loadUmd(file, requireFn) {
+  const code = fs.readFileSync(file, 'utf8');
+  const module = { exports: {} };
+  new Function('module', 'exports', 'require', code)(module, module.exports, requireFn);
+  return module.exports;
+}
+const react = loadUmd(`${dir}react.dev.js`, () => {
+  throw new Error('react 不该 require 别的包');
+});
+const server = loadUmd(`${dir}react-dom-server.dev.js`, (name) => (name === 'react' ? react : (() => { throw new Error(name); })()));
+
+/* ---------- 宿主半：拿真实的 v1 投影值（和界面上那张卡同源） ---------- */
+const host = await import(new URL('../index.js', import.meta.url).href);
+const definitions = [];
+host.apply({ sessionProjections: { register: (definition) => definitions.push(definition) }, inject: () => {} });
+const briefDefinition = definitions.find((definition) => definition.key === 'focusBrief');
+
+const root = path.join(os.homedir(), '.dsh', 'sessions');
+const files = [];
+const walk = (folder) => {
+  for (const entry of fs.readdirSync(folder, { withFileTypes: true })) {
+    const full = path.join(folder, entry.name);
+    if (entry.isDirectory()) walk(full);
+    else if (entry.name === 'session.v4.jsonl.zstd') files.push(full);
+  }
+};
+walk(root);
+
+/** 挑一张「料最足」的卡：有要点、有要你拍板的事、有提问——折叠与展开都看得出层次。 */
+let best = null;
+for (const file of files) {
+  let state = briefDefinition.init();
+  for (const event of readSessionEvents(file)) state = briefDefinition.apply(state, event);
+  for (const brief of briefDefinition.wire.view(state)) {
+    const score = (brief.bullets?.length ?? 0) + (brief.asks?.length ?? 0) * 2 + (brief.prompt === '' ? 0 : 3);
+    if (best === null || score > best.score) best = { score, brief };
+  }
+}
+if (best === null) {
+  console.error('语料里没有可用的 v1 卡片');
+  process.exit(2);
+}
+const brief = best.brief;
+
+/* ---------- 客户端半 ---------- */
+let injected = null;
+globalThis.document = {
+  querySelector: () => null,
+  createElement: () => ({ dataset: {}, textContent: '', remove: () => {} }),
+  head: { appendChild: (tag) => (injected = tag.textContent) },
+};
+const fakeReact = { createElement: () => null, useState: (initial) => [initial, () => {}] };
+let loaded = null;
+globalThis.window = { __ModuleLoader__: { load: (module) => (loaded = module) } };
+await import(new URL('../client.js', import.meta.url).href);
+const clientModule = loaded;
+/** 抓 seat 组件（v1 是 conversation.chat.turnTail）。 */
+let Tail = null;
+const dictionaries = {};
+clientModule
+  .factory((name) => (name === 'react' ? react : (() => { throw new Error(`require 了 ${name}`); })()))
+  .apply({
+    effect: (fn) => fn(),
+    slots: {
+      inject: (key, callback) => callback(),
+      register: (options, component) => {
+        if (options.name === 'conversation.chat.turnTail') Tail = component;
+        return () => {};
+      },
+    },
+    locale: {
+      register: (ns, dicts) => {
+        dictionaries[ns] = dicts;
+        return () => {};
+      },
+      bind: () => (key) => key,
+    },
+  });
+const zh = dictionaries['focus-brief'].zh;
+const t = (key, params) =>
+  (zh[key] ?? `MISSING:${key}`).replace(/\{(\w+)\}/g, (whole, name) => (params !== undefined && name in params ? String(params[name]) : whole));
+
+/** `open` 是 v1 组件里的第一个 useState。 */
+async function render(open) {
+  const queue = [open];
+  const shim = { ...react, useState: (initial) => [queue.shift() ?? initial, () => {}] };
+  let View = null;
+  clientModule
+    .factory((name) => (name === 'react' ? shim : (() => { throw new Error(name); })()))
+    .apply({
+      effect: (fn) => fn(),
+      slots: {
+        inject: (key, callback) => callback(),
+        register: (options, component) => {
+          if (options.name === 'conversation.chat.turnTail') View = component;
+          return () => {};
+        },
+      },
+      locale: { register: () => () => {}, bind: () => t },
+    });
+  // 用流式 API（这份 React 的 UMD 构建里没有 renderToStaticMarkup，v2 的取证页也是这么渲的）。
+  const stream = await server.renderToReadableStream(
+    react.createElement(View, {
+      t,
+      turn: { turn: brief.turn },
+      useProjection: (key, selector) => (selector === undefined ? [brief] : selector([brief])),
+    }),
+  );
+  return await new Response(stream).text();
+}
+
+/* ---------- 主题取值（和 v2 取证页同一套写法） ---------- */
+const source = fs.readFileSync(themeSource(), 'utf8');
+function enclosingBlock(text, index) {
+  const open = text.lastIndexOf('{', index);
+  let depth = 0;
+  for (let i = open; i < text.length; i++) {
+    if (text[i] === '{') depth++;
+    else if (text[i] === '}') {
+      depth--;
+      if (depth === 0) return text.slice(open + 1, i);
+    }
+  }
+  return '';
+}
+const scopeLines = [];
+for (const match of source.matchAll(/--dsw-alias-bg-layer-1\s*:/g)) {
+  const body = enclosingBlock(source, match.index);
+  const lines = [];
+  for (const declaration of body.matchAll(/(--dsw-[a-z0-9-]+)\s*:\s*([^;}]+)/g)) lines.push(`${declaration[1]}:${declaration[2].trim()}`);
+  scopeLines.push(lines.join(';'));
+}
+const globalTokens = [...new Map([...source.matchAll(/(--dsw-[a-z0-9-]+)\s*:\s*(#[0-9a-fA-F]{3,8}|rgba?\([^)]*\))/g)].map((m) => [m[1], m[2]])).entries()]
+  .map(([key, value]) => `${key}:${value}`)
+  .join(';');
+
+const shotsDir = path.join(ROOT, '.tmp', 'shots');
+fs.mkdirSync(shotsDir, { recursive: true });
+const written = [];
+for (const [id, open] of [
+  ['closed', false],
+  ['open', true],
+]) {
+  const card = await render(open);
+  for (const [theme, scope] of [
+    ['light', scopeLines[0]],
+    ['dark', scopeLines[1]],
+  ]) {
+    const page = `<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><title>brief-${id}-${theme}</title><style>
+:root{${globalTokens};${scope}}
+body{margin:0;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-family:"Microsoft YaHei",sans-serif}
+.wrap{max-width:720px;margin:0 auto;padding:18px 18px 40px}
+.foot{padding:6px 2px 0;font-size:12px;color:var(--dsw-alias-label-secondary)}
+${injected}
+</style></head><body><div class="wrap">
+<div class="foot">brief ${id} · ${theme} ｜ 第 ${brief.turn} 轮 ｜ 要点 ${brief.bullets.length} · 待定 ${brief.asks.length} · 提问 ${brief.prompt === '' ? '无' : `${brief.prompt.length} 字`}</div>
+${card}
+</div></body></html>`;
+    const out = path.join(shotsDir, `brief-${id}-${theme}.html`);
+    fs.writeFileSync(out, page, 'utf8');
+    written.push(`brief-${id}-${theme}`);
+  }
+}
+console.log(`写出 ${written.length} 个 v1 取证页到 .tmp/shots/：${written.join('、')}`);
+console.log(`用的那一张卡：第 ${brief.turn} 轮，要点 ${brief.bullets.length} 条、待你拍板 ${brief.asks.length} 条、提问 ${brief.prompt === '' ? '（无）' : '有'}`);
+console.log(`结论：${brief.headline}`);
