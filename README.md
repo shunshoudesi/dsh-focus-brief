@@ -4,14 +4,15 @@
 **需要你确认 / 关键数据 / 产出文件 / 结论建议 / 风险提醒**。块的骨架写死在本地，
 内容由模型按同一份回答格式契约填，**不额外调用模型**。
 
-安装（npm）：
+安装（源码直装，不需要 npm 包）：
 
 ```
-dsh plugin --profile web add dsh-focus-brief
+dsh plugin --profile web add github:shunshoudesi/dsh-focus-brief
 ```
 
-桌面端把 `--profile web` 换成 `--profile desktop`；也可以在 DSH 的「设置 → 插件市场」里
-搜 `dsh-focus-brief` 一键安装。装完**重启 DSH**，会话标题栏就会多出一个「专注」标签。
+桌面端把 `--profile web` 换成 `--profile desktop`。装完**重启 DSH**，会话标题栏就会多出一个「专注」标签。
+也可以去 DSH 的「设置 → 插件市场」里搜 `dsh-focus-brief` 找到这个仓库（详情面板显示的就是这份 README；
+本插件没有发布到 npm，面板里那行 `dsh plugin add dsh-focus-brief` 取不到包，请用上面这条 `github:` 命令）。
 
 ![专注视图：整摞收起](https://raw.githubusercontent.com/shunshoudesi/dsh-focus-brief/main/docs/screenshots/focus-view-collapsed.png)
 
@@ -47,14 +48,19 @@ agent 的回答是一段又长又平的正文：结论埋在中间，要你拍�
 
 ## 安装
 
-npm（推荐，插件市场的「一键安装」走的也是这条）：
+从 GitHub 源码装（**目前唯一可用的方式**；验证过 `pnpm add github:shunshoudesi/dsh-focus-brief` 能取到
+`dsh-focus-brief@0.3.0`，且只装包内白名单那 7 个文件）：
 
 ```
-dsh plugin --profile web add dsh-focus-brief
-dsh plugin --profile desktop add dsh-focus-brief   # 桌面端
+dsh plugin --profile web add github:shunshoudesi/dsh-focus-brief
+dsh plugin --profile desktop add github:shunshoudesi/dsh-focus-brief   # 桌面端
 ```
 
-用本仓库源码装（本地开发，不经过 npm）：
+> 本插件**没有发布到 npm registry**，所以 `dsh plugin --profile web add dsh-focus-brief` 会报取不到包；
+> 插件市场详情里那行一键安装用的正是这条 npm 命令，请在市场里手动复制上面那条 `github:` 命令。
+> 想改成 npm 发布的话，`docs/submission.md` 里有现成步骤与验收命令。
+
+装到本仓库的本地源码（开发时，不经过 git）：
 
 ```
 plugin_manager { action: "install_bundle", target: "<本仓库根的绝对路径>" }
@@ -117,8 +123,10 @@ plugin_manager { action: "install_bundle", target: "<本仓库根的绝对路径
 ## 收录
 
 仓库已加 [`dsh-plugin` topic](https://github.com/topics/dsh-plugin)：DSH 内置的「设置 → 插件市场」按这个 topic
-搜仓库、按仓库名到 npm 取包（所以仓库名与 npm 包名一致：`dsh-focus-brief`），官网
-[dsh-plugin.org](https://dsh-plugin.org) 数据同源。收录要求、提交模板与仓库侧待办见
+搜仓库（搜索实测已命中本仓库），官网 [dsh-plugin.org](https://dsh-plugin.org) 数据同源。
+**当前只在 GitHub 上发布**：两个市场都能搜到、都能看到这份 README，但「一键安装」要求 npm 上有同名包
+（仓库名 = npm 包名，市场自己拼 `dsh plugin add <仓库名>` 这条命令），所以那一步现在会取不到包——
+请用 README 顶部那条 `github:` 命令。要不要补 npm 发布，见
 [`docs/submission.md`](https://github.com/shunshoudesi/dsh-focus-brief/blob/main/docs/submission.md)。
 
 [![Listed on dsh-plugin.org](https://dsh-plugin.org/badges/listed.svg)](https://dsh-plugin.org/plugins/shunshoudesi/dsh-focus-brief)

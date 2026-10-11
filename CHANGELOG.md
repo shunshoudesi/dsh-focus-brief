@@ -4,7 +4,9 @@
 
 ## 0.3.0 — 首个公开发布（2026-10-11）
 
-包名 `dsh-focus-brief`（npm 包名与仓库同名：插件市场按仓库名取 npm 包）。
+包名 `dsh-focus-brief`（与仓库同名：插件市场的「一键安装」按仓库名去 npm 取包，所以两者必须一致）。
+**现阶段只从 GitHub 源码发布**：`dsh plugin --profile web add github:shunshoudesi/dsh-focus-brief`
+（已实测能取到 0.3.0 且只装包内白名单的 7 个文件）；npm registry 上暂未发布，市场里那条一键安装命令取不到包。
 专注视图定型、重点小卡重做、整个仓库就是这一个插件、补齐市场所需材料。
 
 **专注视图（`conversation.view`）**
