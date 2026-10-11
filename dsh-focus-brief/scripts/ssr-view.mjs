@@ -258,6 +258,14 @@ synthetic.push({
 });
 synthetic.push({
   ...base,
+  turn: 914,
+  title: '',
+  prompt: '',
+  promptMedia: 1,
+  blocks: oneBlock,
+});
+synthetic.push({
+  ...base,
   turn: 909,
   title: '奇怪字符',
   headline: '<script>alert(1)</script> & "引号" 😀 \u0000 制表\u0009符',
@@ -319,14 +327,15 @@ for (const turn of allTurns) {
       // 标题位只在该轮没有标题时才用「第 N 轮」兜底，绝不拿结论行去填——那会让同一句话出现两次。
       check(`${tag} 无标题时标题位用「第 N 轮」`, html.includes(escapeHtml(zh['card.turnFallback'].replace('{turn}', String(turn.turn)))));
       const needle = escapeHtml(turn.headline.slice(0, 10));
-      const bubbleAt = html.indexOf('dfv-bubble');
+      // 三段的边界：卡片头（标题位）→ 回答区 → 信息块。
+      // **不能**从 html 开头切：提问气泡排在卡片前面，而你的提问里完全可能正好含结论那句话。
+      const cardAt = html.indexOf('class="dfv-card"');
+      const answerAt = html.indexOf('class="dfv-answer"');
       const blocksAt = html.indexOf('dfv-blocks');
-      // 只比「回答气泡之前」的头部：结论里提到的产出文件名会在下面的「产出文件」块里再出现一次，
-      // 那是应该的（那块的职责就是列出这个文件），不能算重复。
-      check(`${tag} 标题位／卡片头部不许复制结论行`, bubbleAt < 0 || !html.slice(0, bubbleAt).includes(needle));
-      const inBubble = bubbleAt < 0 ? '' : html.slice(bubbleAt, blocksAt < 0 ? html.length : blocksAt);
-      const occurrences = inBubble.split(needle).length - 1;
-      check(`${tag} 回答气泡里结论只该出现一次`, occurrences === 1, `${occurrences} 次`);
+      check(`${tag} 标题位／卡片头部不许复制结论行`, cardAt < 0 || answerAt < 0 || !html.slice(cardAt, answerAt).includes(needle));
+      const inAnswer = answerAt < 0 ? '' : html.slice(answerAt, blocksAt < 0 ? html.length : blocksAt);
+      const occurrences = inAnswer.split(needle).length - 1;
+      check(`${tag} 回答区里结论只该出现一次`, occurrences === 1, `${occurrences} 次`);
     }
     if (turn.title === '' && turn.headline === '' && blocks.length === 0 && turn.chars === 0) {
       check(`${tag} 全空轮次应显示占位`, html.includes(zh['card.turnFallback'].replace('{turn}', String(turn.turn))));
@@ -367,7 +376,19 @@ for (const turn of allTurns) {
     //   于是那几条断言**一次都没跑过**。现在 5 个开关各有各的下标，rawOpen=3、fullOpen=4。）
     const answerRow = (Array.isArray(turn.raw) ? turn.raw : []).find((row) => row.kind === 'answer');
     const fullText = answerRow === undefined ? '' : answerRow.text;
-    check(`${tag} 回答应装在气泡里`, html.includes('dfv-bubble'));
+    check(`${tag} 回答应放在卡片里（.dfv-answer）`, html.includes('dfv-answer'));
+    // 用户输入单独摆出来、**原样**：不改写、不剥标记、换行保留（CSS 用 pre-wrap）。
+    const media = typeof turn.promptMedia === 'number' ? turn.promptMedia : 0;
+    if (turn.prompt !== '') {
+      check(`${tag} 应有单独的提问气泡`, html.includes('class="dfv-ask-text"'));
+      check(`${tag} 提问内容应原样出现`, html.includes(escapeHtml(turn.prompt)));
+    } else if (media > 0) {
+      // 只有附件没有文字（图片）：不能空着，画一个占位标记。
+      check(`${tag} 只有附件时应有占位提问气泡`, html.includes('class="dfv-ask-text"') && html.includes('data-media="true"'));
+      check(`${tag} 占位应说明几个附件`, html.includes(escapeHtml(zh['card.askMedia'].replace('{count}', String(media)))));
+    } else {
+      check(`${tag} 没有提问的轮次不该有提问气泡`, !html.includes('class="dfv-ask-text"'));
+    }
     if (fullText !== '') {
       check(`${tag} 回答全文按钮应带无障碍名称`, html.includes(escapeHtml(zh['a11y.full'].replace('{count}', String(fullText.length)))));
       if (fullOpen) {

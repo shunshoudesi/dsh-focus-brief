@@ -153,10 +153,11 @@ const must = [
   // 那时必须由视图自己滚；而在活跃期由外壳滚。两半都在，才两种配置都对。
   ['v2 根容器保留自己滚的能力（overlay 配置下包装层会裁切）', /\.dfv-root\{[^}]*overflow-y:auto/],
   ['v2 根容器保留链式滚动（overscroll-behavior:auto）', /\.dfv-root\{[^}]*overscroll-behavior:auto/],
-  // 回答气泡照官方对话那条气泡的样子：用官方自己的 `--dsw-specific-bubble`（浅蓝底）+ label-primary（黑字）。
+  // 用户提问照官方对话那条气泡的样子：用官方自己的 `--dsw-specific-bubble`（浅蓝底）+ label-primary（黑字）。
   // 这个 token 不在官方清单里，所以必须带兜底色（下面 token 存在性那一段也会再查一次）。
-  ['回答气泡用官方气泡底色 token（带兜底）', /\.dfv-bubble\{[^}]*background-color:var\(--dsw-specific-bubble,#edf3fe\)/],
-  ['回答气泡圆角用官方 radius token（带兜底）', /\.dfv-bubble\{[^}]*border-radius:var\(--dsw-radius-md,12px\)/],
+  ['提问气泡用官方气泡底色 token（带兜底）', /\.dfv-ask-text\{[^}]*background-color:var\(--dsw-specific-bubble,#edf3fe\)/],
+  ['提问气泡圆角用官方 radius token（带兜底）', /\.dfv-ask-text\{[^}]*border-radius:var\(--dsw-radius-xl,20px\)/],
+  ['提问原样显示（保住你自己敲的换行与空格）', /\.dfv-ask-text\{[^}]*white-space:pre-wrap/],
   ['回答正文渲染成元素（围栏代码块保留换行）', /\.dfv-pre\{[^}]*white-space:pre-wrap/],
   ['回答正文里的表格有边框', /\.dfv-table th,\.dfv-table td\{[^}]*border:1px solid var\(--dsw-alias-border-l1\)/],
   // 踩过的坑：说明文字是 <span>，`margin-top` 对行内元素无效，结果和工具名粘在一行
@@ -176,12 +177,14 @@ for (const [label, pattern] of must) {
 // （要你定的事 / 关键数据 / 产出文件 / 结论建议 / 风险提醒），工具调用时间线不进卡。
 // 宿主那一半已经不再产出 steps 块，样式这半再钉一次：那些选择器一旦回来就算失败。
 for (const [label, pattern] of [
-  ['步骤时间线选择器（.dfv-steps / .dfv-step*）', /\.dfv-step/],
-  ['步骤图标底色（data-id="steps"）', /data-id="steps"/],
-  ['步骤文案键（block.steps / count.steps）', /block\.steps|count\.steps/],
-  ['「执行过程」这个块名', /执行过程/],
+  ['执行日志的步骤时间线选择器（.dfv-steps / .dfv-step*）', /\.dfv-step/],
+  ['执行日志的步骤图标底色（data-id="steps"）', /data-id="steps"/],
+  ['执行日志的步骤文案键（block.steps / count.steps）', /block\.steps|count\.steps/],
+  ['执行日志的「执行过程」块名', /执行过程/],
+  // 蓝底只给「你的提问」：官方那边蓝底就是用户消息。回答留在卡片里、白底（用户明确要求分开）。
+  ['回答上的气泡底色（.dfv-answer 不该有 background）', /\.dfv-answer\{[^}]*background/],
 ]) {
-  if (pattern.test(css)) problems.push(`执行日志的${label}又出现在样式里了`);
+  if (pattern.test(css)) problems.push(`${label}又出现在样式里了`);
 }
 
 console.log(`\nCSS 长度 ${css.length} 字符｜问题 ${problems.length} 项`);

@@ -57,6 +57,7 @@ window.__ModuleLoader__.load({
       'card.empty': '（本轮没有正文可提炼）',
       'card.fullOpen': '展开回答全文 {count} 字',
       'card.fullClose': '收起全文',
+      'card.askMedia': '（你发来 {count} 个附件，没有文字）',
       'card.meta': '{tools} 次工具调用 · 正文 {chars} 字',
       'card.turnFallback': '第 {turn} 轮',
       'state.done': '完成',
@@ -120,6 +121,7 @@ window.__ModuleLoader__.load({
       'card.empty': '(No prose to distill in this turn)',
       'card.fullOpen': 'Show the full answer ({count} chars)',
       'card.fullClose': 'Collapse the answer',
+      'card.askMedia': '({count} attachment(s), no text)',
       'card.meta': '{tools} tool calls · {chars} chars',
       'card.turnFallback': 'Turn {turn}',
       'state.done': 'Done',
@@ -196,7 +198,15 @@ window.__ModuleLoader__.load({
          在活跃期我的根节点没有可滚内容却仍是滚动容器，`contain` 把滚轮吞掉又不许传给 scrollBody，
          于是用户报「专注界面滚轮没法用」。auto 让滚到头时链式交给外壳。 */
       '.dfv-root{box-sizing:border-box;flex:1 1 auto;min-height:0;height:auto;overflow-y:auto;overscroll-behavior:auto;padding:18px 18px 40px}',
-      '.dfv-feed{max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:14px}',
+      '.dfv-feed{max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:26px}',
+      /* 一轮 = 你的提问（原样，官方那条蓝底气泡）+ 回答卡片。 */
+      '.dfv-turn{display:flex;flex-direction:column;gap:10px}',
+      '.dfv-ask{display:flex;flex-direction:column;align-items:flex-end;max-width:82%;align-self:flex-end}',
+      /* 你输入的内容**原样**显示：白底换成官方气泡的蓝底、字是 label-primary（浅色下即黑字），
+         `white-space:pre-wrap` 保住你自己敲的换行与空格，不做任何改写、不剥 markdown 标记。 */
+      '.dfv-ask-text{max-width:100%;background-color:var(--dsw-specific-bubble,#edf3fe);color:var(--dsw-alias-label-primary);border-radius:var(--dsw-radius-xl,20px);padding:9px 13px;font-size:14px;line-height:21px;white-space:pre-wrap;overflow-wrap:anywhere}',
+      /* 只有附件、没有文字的那一轮：占位是标记，不是用户原话，所以压淡一档。 */
+      '.dfv-ask-text[data-media="true"]{color:var(--dsw-alias-label-secondary)}',
       '.dfv-empty{padding:40px 0;text-align:center;font-size:12.5px;color:var(--dsw-alias-label-secondary)}',
 
       /* ---------- 一张结果卡 ---------- */
@@ -215,12 +225,10 @@ window.__ModuleLoader__.load({
       '.dfv-state[data-state="done"],.dfv-state[data-state="run"],.dfv-state[data-state="wait"],.dfv-state[data-state="fail"],.dfv-state[data-state="interrupt"]{background-color:var(--dsw-alias-bg-layer-2)}',
       '.dfv-value{margin:0;font-size:15px;line-height:1.55;color:var(--dsw-alias-label-primary);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}',
       '.dfv-value[data-empty="true"]{color:var(--dsw-alias-label-secondary);font-size:13.5px}',
-      /* ---------- 回答气泡：照官方对话里那条气泡的样子 ---------- */
-      /* 底色用官方气泡自己的 token `--dsw-specific-bubble`（浅色 #edf3fe、深色 #2c2c2e），
-         字色用 label-primary（浅色下就是黑字）。它**不在官方 token 清单里**，所以带兜底色：
-         主题改名时退回浅蓝，而不是变成透明。圆角用 radius-md(12px) 而不是官方气泡的
-         radius-xl(20px)——气泡现在住在 16px 圆角的卡片里，20px 会顶破卡片的圆角。 */
-      '.dfv-bubble{margin:0 16px 12px;background-color:var(--dsw-specific-bubble,#edf3fe);border-radius:var(--dsw-radius-md,12px);padding:10px 12px}',
+      /* ---------- 回答：就在卡片里 ---------- */
+      /* 回答**不再**用蓝底：官方那边蓝底是「你的消息」，这一版按用户要求把提问单独摆出来、
+         保持官方的蓝底黑字，回答则留在卡片里、白底（要改回蓝底就一行 CSS）。 */
+      '.dfv-answer{margin:0 16px 12px}',
       '.dfv-full{font-size:13.5px;line-height:21px;color:var(--dsw-alias-label-primary);overflow-wrap:anywhere}',
       /* 回答正文里的 markdown 元素（自己渲染的那一层，见 markdownNodes）。 */
       '.dfv-full > :first-child{margin-top:0}',
@@ -344,7 +352,7 @@ window.__ModuleLoader__.load({
       '}',
 
       /* ---------- 高对比模式与减少动效 ---------- */
-      '@media (forced-colors:active){.dfv-card,.dfv-blocks[data-open="false"] .dfv-block,.dfv-blocks[data-open="true"] .dfv-block{border-color:CanvasText;box-shadow:none}.dfv-ico,.dfv-file-ico{background-color:Canvas;color:CanvasText;border:1px solid CanvasText}.dfv-bubble{border:1px solid CanvasText}}',
+      '@media (forced-colors:active){.dfv-card,.dfv-blocks[data-open="false"] .dfv-block,.dfv-blocks[data-open="true"] .dfv-block{border-color:CanvasText;box-shadow:none}.dfv-ico,.dfv-file-ico{background-color:Canvas;color:CanvasText;border:1px solid CanvasText}.dfv-ask-text{border:1px solid CanvasText}}',
       '@media (prefers-reduced-motion:reduce){.dfv-block,.dfv-arrow{transition:none}}',
     ].join('');
 
@@ -951,7 +959,7 @@ function scrollDecision(state) {
         ),
       );
 
-      // 「回答」就在卡里：默认是那句话结论，点开换成全文。
+      // 「回答」就在卡里：默认是那句话结论，点开换成全文（白底，不用气泡——蓝底留给你的提问）。
       // 全文直接取原始记录里那一行（kind === 'answer'），**不额外往投影里塞一份副本**——
       // 那一行本来就是这一轮的最终回答原文（最近 8 轮带，更早的轮次只留提炼结果）。
       const answerRow = (Array.isArray(turn.raw) ? turn.raw : []).find((row) => row.kind === 'answer');
@@ -960,7 +968,7 @@ function scrollDecision(state) {
       // 展开时只画全文：全文本来就从那句结论开始，两行都画就是同屏重复。
       const answer = h(
         'div',
-        { className: 'dfv-bubble', 'data-open': showFull ? 'true' : 'false' },
+        { className: 'dfv-answer', 'data-open': showFull ? 'true' : 'false' },
         showFull
           ? h('div', { className: 'dfv-full' }, markdownNodes(full))
           : h('div', { className: 'dfv-value', 'data-empty': headline === '' ? 'true' : 'false' }, headline === '' ? t('card.empty') : headline),
@@ -1113,7 +1121,20 @@ function scrollDecision(state) {
         h(
           'div',
           { className: 'dfv-feed' },
-          turns.map((turn) => h(TurnCard, { key: turn.turn, turn, t, inputActions: props.inputActions })),
+          turns.map((turn) => {
+            // 用户输入单独摆出来、**原样**显示（不改写、不折叠、不剥标记）。
+            // 只有附件没有文字的那一轮（图片）画一个占位标记，不然卡片上方会空着、看不出你发过东西。
+            const media = typeof turn.promptMedia === 'number' ? turn.promptMedia : 0;
+            const askText = turn.prompt !== '' ? turn.prompt : media > 0 ? t('card.askMedia', { count: media }) : '';
+            return h(
+              'div',
+              { className: 'dfv-turn', key: turn.turn },
+              askText === ''
+                ? null
+                : h('div', { className: 'dfv-ask' }, h('div', { className: 'dfv-ask-text', 'data-media': turn.prompt === '' ? 'true' : 'false' }, askText)),
+              h(TurnCard, { turn, t, inputActions: props.inputActions }),
+            );
+          }),
         ),
       );
     }

@@ -80,7 +80,7 @@ for (const name of fs.readdirSync(cacheDir)) {
     for (let index = 0; index < Math.max(offlineTurnsList.length, onlineTurnsList.length); index++) {
       if (JSON.stringify(offlineTurnsList[index]) === JSON.stringify(onlineTurnsList[index])) continue;
       console.log(`   第一处不同在第 ${index + 1} 条：`);
-      for (const key of ['turn', 'end', 'prompt', 'title', 'chars', 'steps', 'toolsTotal', 'pending']) {
+      for (const key of ['turn', 'end', 'prompt', 'promptMedia', 'title', 'chars', 'steps', 'toolsTotal', 'pending']) {
         if (JSON.stringify(offlineTurnsList[index]?.[key]) === JSON.stringify(onlineTurnsList[index]?.[key])) continue;
         console.log(`     ${key}: 离线 ${JSON.stringify(offlineTurnsList[index]?.[key])?.slice(0, 60)} vs 宿主 ${JSON.stringify(onlineTurnsList[index]?.[key])?.slice(0, 60)}`);
       }

@@ -67,8 +67,14 @@ let selfDup = 0;
 let noBlocks = 0;
 /** 有标题的轮次（契约标题，或从提问抽的兜底标题）。 */
 let titled = 0;
+/** 提问为空的轮次（这些轮卡片上方没有提问气泡）。 */
+let emptyPrompt = 0;
+/** 只有附件、没有文字的提问（图片）——这些轮靠客户端画占位。 */
+let mediaPrompts = 0;
 /** 每轮有几个信息块（决定叠压还是铺开：>2 才叠）。 */
 const blockHist = new Map();
+/** 闸门：总卡标题不许是提问的截断——提问现在原样摆在卡片上方，再抄一遍就是同屏重复。 */
+let titleDup = 0;
 /** 闸门：卡片里不该再有「执行过程」块——用户明确说过不要执行日志（那是官方「轨迹」视图的活）。 */
 let stepsBlocks = 0;
 /** 闸门：条目必须带「字」。剥掉 markdown 标记后只剩标点的条目（`---`、孤零零的反引号）不许上卡。 */
@@ -191,6 +197,11 @@ for (const file of files) {
       if (/^[a-z0-9]+_[a-z0-9_]+(?= ·|$)/.test(String(row.text))) rawLabels++;
     }
     if (turn.title !== '') titled++;
+    // 标题不许是提问的截断（提问已经单独摆在卡片上方）。
+    if (turn.title !== '' && turn.prompt !== '') {
+      const norm = (value) => value.replace(/^\/[a-zA-Z-]+\s+/, '').replace(/\s+/g, ' ').trim();
+      if (norm(turn.prompt).startsWith(norm(turn.title))) titleDup++;
+    }
     // 结论行不许是表格压平的产物（竖线扎堆）、结构线、或整张列表压平（`- a - b - c`）。
     if (
       turn.headline !== '' &&
@@ -241,6 +252,8 @@ for (const file of files) {
         }
       }
     }
+    if (turn.prompt === '') emptyPrompt++;
+    if ((turn.promptMedia ?? 0) > 0) mediaPrompts++;
     states.set(turn.state, (states.get(turn.state) ?? 0) + 1);
     for (const block of turn.blocks) blocks.set(block.id, (blocks.get(block.id) ?? 0) + 1);
     if (turn.title !== '') titleFromContract++;
@@ -264,7 +277,9 @@ console.log(`出现过的信息块: ${[...blocks.entries()].map(([key, count]) =
 console.log(
   `块数分布: ${[...blockHist.entries()].sort((a, b) => a[0] - b[0]).map(([count, n]) => `${count}块=${n}轮`).join('  ')}（>2 块才叠成一摞，其余直接铺开）`,
 );
-console.log(`有标题的轮次 ${titleFromContract} / ${turns}（契约标题或从提问抽的兜底标题）｜有正文但结论行抽不出 ${headlineEmpty} 轮`);
+console.log(`提问为空的轮次 ${emptyPrompt} 轮｜其中「只有附件、没有文字」的 ${mediaPrompts} 轮（客户端画占位标记）`);
+console.log(`有契约标题的轮次 ${titleFromContract} / ${turns}（拿不到就显示「第 N 轮」——提问已经原样摆在卡片上方，不再从提问抽标题）｜有正文但结论行抽不出 ${headlineEmpty} 轮`);
+console.log(`总卡标题与提问重复的轮次 ${titleDup} 轮（回归闸门：应为 0——提问已经单独摆出来了）`);
 console.log(`关键数据块 ${kpiTurns} 轮 | 风险块 ${riskTurns} 轮 | 产出文件块 ${fileTurns} 轮 | 提问以问号结尾 ${questions} 轮`);
 console.log(`最大投影值 ${biggest.bytes} 字节（${path.basename(path.dirname(biggest.file))}）`);
 console.log(`同会话 v1 投影最大值 ${biggestBrief.bytes} 字节`);
@@ -340,4 +355,4 @@ if (dumped !== null && samples[dumped] !== undefined) {
 
 // 闸门直接决定退出码：结论重复、卡片里混进执行日志、产出文件里混进垃圾、样板成功语、关键数据不成样、产出文件重复行。
 // 外加一条成本闸门：单轮 wire 体积不许超过预算。
-if (selfDup + stepsBlocks + junkItems + missingAnswer + junkHeadlines + junkFiles + boilerplateNotes + kpiJunk + duplicateFiles + crossBlockDup + markupNotes + rawLabels + overBudget > 0) process.exit(1);
+if (selfDup + stepsBlocks + junkItems + missingAnswer + junkHeadlines + titleDup + junkFiles + boilerplateNotes + kpiJunk + duplicateFiles + crossBlockDup + markupNotes + rawLabels + overBudget > 0) process.exit(1);

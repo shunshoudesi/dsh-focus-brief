@@ -430,7 +430,7 @@ const VIEW_KEY = 'focusView';
  * v2 = 工具名美化（MCP）+ 产出文件过滤；v3 = 产出文件改存去重键 `key`（并改存完整路径）；
  * v4 = 工具名美化扩到 snake_case（存的是 label）+ 结果说明挡掉带标记语言的短结果。
  */
-const VIEW_STATE_VERSION = 5;
+const VIEW_STATE_VERSION = 6;
 
 /** 专注视图保留的轮次数（比 v1 少：每轮带的原料多得多）。 */
 const VIEW_TURN_LIMIT = 30;
@@ -440,8 +440,6 @@ const VIEW_PROMPT_LIMIT = 240;
 const VIEW_SAID_LIMIT = 600;
 const VIEW_SAID_MAX = 4;
 const VIEW_TITLE_LIMIT = 30;
-/** 从提问抽标题时的长度上限（比契约标题短一点：它是兜底，不该抢戏）。 */
-const PROMPT_TITLE_LIMIT = 24;
 const TOOL_DETAIL_LIMIT = 80;
 const TOOL_NOTE_LIMIT = 200;
 const SHORT_NOTE_LIMIT = 120;
@@ -862,19 +860,6 @@ function truncate(text, limit) {
   return `${text.slice(0, limit).trimEnd()}…`;
 }
 
-/**
- * 标题兜底：从用户这一轮的提问里取第一小句。
- *
- * 契约标题拿不到时用它——**不要**拿结论行当标题：那会让同一句话在标题位和结论行各出现一次，
- * 正好是这张卡要消灭的那种重复。所以标题位要么是模型给的标题、要么是「你这轮问了什么」、要么是「第 N 轮」。
- */
-function titleFromPrompt(prompt) {
-  if (prompt === '') return '';
-  const body = prompt.replace(/^\/[a-zA-Z-]+\s+/, '').trim();
-  const first = body.split(/[。！？!?；;\n]/)[0].trim();
-  return clip(first === '' ? body : first, PROMPT_TITLE_LIMIT);
-}
-
 /** 一整个轮次的原始折叠结果（专注视图版）。 */
 function emptyViewTurn(turn, startSeq, time) {
   return {
@@ -882,6 +867,8 @@ function emptyViewTurn(turn, startSeq, time) {
     startSeq,
     time,
     prompt: '',
+    /** 用户消息里没有文字、只有附件（实测 2 轮是图片）时的附件个数——客户端据此画个占位。 */
+    promptMedia: 0,
     // answer = 这一轮最后一条助手文字（就是最终回答）；said = 之前那些进度消息。
     answer: '',
     title: '',
@@ -934,10 +921,19 @@ function foldViewEvent(state, event) {
     }
     case 'user/message': {
       if (last === undefined) return state;
-      if (last.prompt !== '') return state;
+      if (last.prompt !== '' || last.promptMedia > 0) return state;
       if (data.source?.kind !== 'user') return state;
       const text = contentText(data.content, VIEW_PROMPT_LIMIT);
-      if (text === '' || text.startsWith('<system-reminder')) return state;
+      // 没文字的纯附件消息（实测语料里有 2 轮，用户直接贴了图片）：卡片上方不能空着，
+      // 记一个标记让客户端画「你发来 N 个附件，没有文字」。客户端插件拿不到附件渲染接口（没有这个 service），
+      // 所以只能给标记，不能把图贴出来。
+      const media = Array.isArray(data.content)
+        ? data.content.filter((block) => block !== null && typeof block === 'object' && block.type !== 'text').length
+        : 0;
+      if (text === '' || text.startsWith('<system-reminder')) {
+        if (text !== '' || media === 0) return state;
+        return { turns: [...turns.slice(0, -1), { ...last, promptMedia: media }] };
+      }
       return { turns: [...turns.slice(0, -1), { ...last, prompt: clip(text, VIEW_PROMPT_LIMIT) }] };
     }
     case 'assistant/message': {
@@ -1118,9 +1114,15 @@ function viewTurnOf(entry, isLast, withRaw) {
     stateReason: entry.end === null || entry.end === 'completed' ? '' : entry.end,
     /** 这一轮结尾留下的待办事项数（完成但有「需要你确认」段时 > 0，卡片上显示成「完成 · 待你定 N」）。 */
     decisions: asks.length,
-    title: entry.title !== '' ? entry.title : titleFromPrompt(entry.prompt),
+    // 标题位只认**模型给的契约标题**，拿不到就留给客户端显示「第 N 轮」。
+    // 原先拿提问兜底（从提问抽第一小句），但用户要求「把输入的内容单独摆出来、原样显示」之后，
+    // 提问已经完整地摆在卡片上方了——再在标题位重复它一遍就是同屏重复（截图里亲眼见到两行一模一样的字）。
+    // **也不要**拿结论行当标题：同样会让同一句话出现两次。
+    title: entry.title,
     headline,
     prompt: entry.prompt,
+    /** 只有附件、没有文字的提问（图片）——客户端画个占位，不然卡片上方会空着。 */
+    promptMedia: entry.promptMedia,
     blocks: blocks.slice(0, 5),
     raw: raw.slice(0, RAW_MAX),
     rawTotal,
