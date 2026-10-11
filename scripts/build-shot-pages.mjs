@@ -66,13 +66,25 @@ pool.push({
   blocks: [
     { id: 'asks', items: [{ text: '要不要把默认改成收起' }, { text: '圆点要不要留' }] },
     { id: 'kpi', items: [{ k: '信息块', v: '4' }, { k: '默认收起', v: '4' }] },
-    { id: 'files', items: [{ path: 'dsh-focus-brief/client.js', name: 'client.js', dir: 'dsh-focus-brief', ext: 'JS' }, { path: 'dsh-focus-brief/index.js', name: 'index.js', dir: 'dsh-focus-brief', ext: 'JS' }] },
+    // 产出文件特意给 7 项（> 预览的 5 项）：这样「还有 N 个 › + 收起这块」那一行在截图里真的会出现。
+    {
+      id: 'files',
+      items: [
+        { path: 'dsh-focus-brief/client.js', name: 'client.js', dir: 'dsh-focus-brief', ext: 'JS' },
+        { path: 'dsh-focus-brief/index.js', name: 'index.js', dir: 'dsh-focus-brief', ext: 'JS' },
+        { path: 'dsh-focus-brief/scripts/ssr-view.mjs', name: 'ssr-view.mjs', dir: 'scripts', ext: 'MJS' },
+        { path: 'dsh-focus-brief/scripts/css-check.mjs', name: 'css-check.mjs', dir: 'scripts', ext: 'MJS' },
+        { path: 'dsh-focus-brief/scripts/contrast-check.mjs', name: 'contrast-check.mjs', dir: 'scripts', ext: 'MJS' },
+        { path: 'dsh-focus-brief/scripts/shoot-pages.mjs', name: 'shoot-pages.mjs', dir: 'scripts', ext: 'MJS' },
+        { path: 'dsh-focus-brief/MANUAL.md', name: 'MANUAL.md', dir: 'dsh-focus-brief', ext: 'MD' },
+      ],
+    },
     { id: 'points', items: [{ depth: 0, text: '点「展开 4 个信息块」只铺开标题行' }, { depth: 1, text: '再点这一块才把内容放进 DOM' }] },
   ],
   full: '',
   fullGone: true,
   truncated: false,
-  counts: { files: 2, tools: 0, kpi: 2, points: 2, risks: 0, asks: 2 },
+  counts: { files: 7, tools: 0, kpi: 2, points: 2, risks: 0, asks: 2 },
   steps: 0,
   chars: 33,
 });
@@ -86,6 +98,10 @@ const CASES = [
   ['deck-open-rows', (turn) => (turn.blocks ?? []).length >= 3 && has(turn, 'points'), [true, {}, {}, false]],
   // 再点开其中一块：只有那一块把内容铺出来。
   ['block-open', (turn) => (turn.blocks ?? []).length >= 3 && has(turn, 'points'), [true, { points: true }, {}, false]],
+  // 多项块（文件 7 项 > 预览 5 项）：底部那一行该同时有「还有 2 个 ›」与「收起这块」。
+  ['block-open-more', (turn) => has(turn, 'files') && has(turn, 'points'), [true, { files: true }, {}, false]],
+  // 再点「还有 N 个」：变成「只看前 5 个」——这条分支以前是**单向门**，用户就是冲它提的。
+  ['block-open-all', (turn) => has(turn, 'files') && has(turn, 'points'), [true, { files: true }, { files: true }, false]],
   ['f2-no-blocks', (turn) => (turn.blocks ?? []).length === 0, [false, {}, {}, false]],
   ['interrupt', (turn) => turn.state === 'interrupt', [false, {}, {}, false]],
   // 结论最长的那一轮：专门用来看「结论那一行会不会被裁」。

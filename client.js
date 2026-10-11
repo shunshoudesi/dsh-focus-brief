@@ -90,6 +90,9 @@ window.__ModuleLoader__.load({
       'card.expandBlocks': '展开 {count} 个信息块',
       'card.collapseBlocks': '收起',
       'card.more': '还有 {count} 个 ›',
+      'card.less': '只看前 {count}',
+      'card.collapseBlock': '收起这块',
+      'a11y.collapseBlock': '收起「{label}」这一块',
       'card.fullGone': '这轮较早，只保留提炼结果',
       'card.truncated': '正文过长已截断，切回对话视图看全文。',
       'card.followUp': '继续追问',
@@ -144,6 +147,9 @@ window.__ModuleLoader__.load({
       'card.expandBlocks': 'Expand {count} blocks',
       'card.collapseBlocks': 'Collapse',
       'card.more': '{count} more ›',
+      'card.less': 'First {count}',
+      'card.collapseBlock': 'Collapse block',
+      'a11y.collapseBlock': 'Collapse the “{label}” block',
       'card.fullGone': 'Older turn: digest only',
       'card.truncated': 'Answer truncated — switch to the Chat view for the full text.',
       'card.followUp': 'Follow up',
@@ -296,8 +302,16 @@ window.__ModuleLoader__.load({
       '.dfv-note[data-tone]::before{content:"!";flex:none;font-weight:700;color:var(--dsw-alias-state-error-primary)}',
       '.dfv-note[data-tone="warn"]::before{content:"?";color:var(--dsw-alias-state-warn-primary)}',
       '.dfv-note-text{flex:1 1 auto;min-width:0;overflow-wrap:anywhere}',
-      '.dfv-more{display:block;width:100%;margin-top:8px;padding:7px;border:0;border-radius:8px;background-color:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);font:inherit;font-size:12px;font-weight:600;cursor:pointer}',
+      /* 块底部那一行（只在「项数多到要折叠」时才渲染，所以短块的底边仍是干净的）：
+         左边管**项数**（还有 N 个 › ⇄ 只看前 M 个），右边管**这一块**（收起这块）。
+         为什么右边还要一个：块内容变长之后标题行已经滚出视野，收起不该要求你再滚回去找它。 */
+      '.dfv-block-foot{display:flex;align-items:stretch;gap:6px;margin-top:8px}',
+      '.dfv-more{flex:1 1 auto;min-width:0;padding:7px 8px;border:0;border-radius:8px;background-color:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);font:inherit;font-size:12px;font-weight:600;cursor:pointer}',
       '.dfv-more:hover{background-color:var(--dsw-alias-border-l1)}',
+      '.dfv-more:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}',
+      '.dfv-collapse{flex:none;padding:7px 12px;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;background-color:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;font-weight:600;cursor:pointer}',
+      '.dfv-collapse:hover{color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-border-l2)}',
+      '.dfv-collapse:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}',
       '.dfv-pill{display:flex;align-items:center;justify-content:center;gap:5px;margin:12px auto 0;width:fit-content;padding:6px 14px;border:1px solid var(--dsw-alias-border-l1);border-radius:999px;background-color:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary);font:inherit;font-size:12.5px;font-weight:500;cursor:pointer}',
       '.dfv-pill:hover{color:var(--dsw-alias-label-primary)}',
 
@@ -330,7 +344,7 @@ window.__ModuleLoader__.load({
       '}',
 
       /* ---------- 高对比模式与减少动效 ---------- */
-      '@media (forced-colors:active){.dfv-card,.dfv-blocks[data-open="false"] .dfv-block,.dfv-blocks[data-open="true"] .dfv-block{border-color:CanvasText;box-shadow:none}.dfv-ico,.dfv-file-ico{background-color:Canvas;color:CanvasText;border:1px solid CanvasText}.dfv-ask-text{border:1px solid CanvasText}}',
+      '@media (forced-colors:active){.dfv-card,.dfv-blocks[data-open="false"] .dfv-block,.dfv-blocks[data-open="true"] .dfv-block{border-color:CanvasText;box-shadow:none}.dfv-ico,.dfv-file-ico{background-color:Canvas;color:CanvasText;border:1px solid CanvasText}.dfv-ask-text,.dfv-collapse{border:1px solid CanvasText}}',
       '@media (prefers-reduced-motion:reduce){.dfv-block,.dfv-arrow{transition:none}}',
     ].join('');
 
@@ -631,6 +645,18 @@ function estimateLines(text) {
 /** 超过两行才提示（两行是目标，不是上限）。 */
 const HEADLINE_LINE_TARGET = 2;
 
+/**
+ * 把「哪几块被点开了 / 哪几块铺开了全部项」这类**白名单**翻一位（纯函数）。
+ *
+ * 为什么抽出来：SSR 回归只能按固定值渲染，**点下去之后状态怎么变**是它的盲区；
+ * 而信息块现在有两个开关（块本身、块内项数），翻位逻辑正是它们双双「能开也能收」的地方。
+ * 抽成纯函数就能像 `scrollDecision` 那样被真的跑一遍（见 `ssr-view.mjs` 里的真源码查表）。
+ * 顶格写是为了被 `\n}` 的正则整段抠出来——和上面两个纯函数同一套做法。
+ */
+function toggleFlag(map, key) {
+  return { ...map, [key]: !(map[key] === true) };
+}
+
 /** 一个带小标题的内容块。 */
     function Block(label, node) {
       return h('div', { className: 'dfb-block', key: label }, h('div', { className: 'dfb-label' }, label), node);
@@ -805,15 +831,36 @@ const HEADLINE_LINE_TARGET = 2;
 
     /** 信息块的具体内容。 */
     function BlockBody(props) {
-      const { block, t, showAll, onShowAll } = props;
+      const { block, t, label, showAll, onToggleAll, onCollapse } = props;
       const items = Array.isArray(block.items) ? block.items : [];
       const preview = BLOCK_PREVIEW[block.id] ?? 6;
       const visible = showAll ? items : items.slice(0, preview);
       const hidden = items.length - visible.length;
-      const more =
-        hidden <= 0
+      // 底部这一行只在「项数多到要折叠」时才出现——也就是用户说的「像这种比较多的」。
+      // 两件事分开做，因为它们是两件事：
+      //   ① 左边那个按钮管**项数**：「还有 N 个 ›」原来是单向门，点开就再也回不到预览条数，
+      //      现在它同时是「只看前 M 个」；
+      //   ② 右边那个按钮管**这一块**：块内容变长之后标题行已经滚出视野，
+      //      收起不该要求你再滚回上面去找它（用户原话：「展开后也要有收起按钮」）。
+      const foot =
+        items.length <= preview
           ? null
-          : h('button', { type: 'button', className: 'dfv-more', onClick: onShowAll }, t('card.more', { count: hidden }));
+          : h(
+              'div',
+              { className: 'dfv-block-foot' },
+              h(
+                'button',
+                { type: 'button', className: 'dfv-more', 'aria-expanded': showAll === true, onClick: onToggleAll },
+                showAll
+                  ? t('card.less', { count: t(BLOCK_COUNT[block.id] ?? 'count.points', { count: preview }) })
+                  : t('card.more', { count: hidden }),
+              ),
+              h(
+                'button',
+                { type: 'button', className: 'dfv-collapse', 'aria-label': t('a11y.collapseBlock', { label }), onClick: onCollapse },
+                t('card.collapseBlock'),
+              ),
+            );
 
       if (block.id === 'kpi') {
         return h(
@@ -826,7 +873,7 @@ const HEADLINE_LINE_TARGET = 2;
               h('div', { className: 'dfv-kv-cell', key: `${index}:${item.k}` }, h('div', { className: 'dfv-kv-k' }, item.k), h('div', { className: 'dfv-kv-v' }, item.v)),
             ),
           ),
-          more,
+          foot,
         );
       }
 
@@ -843,7 +890,7 @@ const HEADLINE_LINE_TARGET = 2;
               item.dir === '' ? null : h('span', { className: 'dfv-file-dir' }, item.dir),
             ),
           ),
-          more,
+          foot,
         );
       }
 
@@ -862,7 +909,7 @@ const HEADLINE_LINE_TARGET = 2;
               ),
             ),
           ),
-          more,
+          foot,
         );
       }
 
@@ -878,7 +925,7 @@ const HEADLINE_LINE_TARGET = 2;
             h('span', { className: 'dfv-note-text' }, item.text),
           ),
         ),
-        more,
+        foot,
       );
     }
 
@@ -980,14 +1027,19 @@ const HEADLINE_LINE_TARGET = 2;
             count: countText,
             closed: !expanded,
             ariaLabel: t('a11y.block', { label, count: countText }),
-            onToggle: open ? () => setOpened((prev) => ({ ...prev, [block.id]: !isOpen })) : () => setDeckOpen(true),
+            onToggle: open ? () => setOpened((prev) => toggleFlag(prev, block.id)) : () => setDeckOpen(true),
           }),
           expanded
             ? h(BlockBody, {
                 block,
                 t,
+                label,
                 showAll: showAll[block.id] === true,
-                onShowAll: () => setShowAll((prev) => ({ ...prev, [block.id]: true })),
+                // 左边那个按钮是**双向**的：项数多时「还有 N 个 ›」，全铺开后变成「只看前 M 个」。
+                onToggleAll: () => setShowAll((prev) => toggleFlag(prev, block.id)),
+                // 右边那个按钮：把**这一块**收回去（等价于点标题行，但不用滚回去找它）。
+                // 这里写死 `false` 而不是翻位——它的语义是「收起」，不该依赖当前是什么状态。
+                onCollapse: () => setOpened((prev) => ({ ...prev, [block.id]: false })),
               })
             : null,
         );
@@ -1009,10 +1061,13 @@ const HEADLINE_LINE_TARGET = 2;
                     {
                       type: 'button',
                       className: 'dfv-pill',
-                      // 收起整摞时把「点开过哪几块」也清掉：下次展开又是 N 个收起的标题行，
+                      // 收起整摞时把「点开过哪几块、哪几块铺开了全部项」也清掉：下次展开又是 N 个收起的标题行，
                       // 而不是把上次看过的内容原样倒回来（点开一块是「这次要看」，不是永久设置）。
                       onClick: () => {
-                        if (deckOpen) setOpened({});
+                        if (deckOpen) {
+                          setOpened({});
+                          setShowAll({});
+                        }
                         setDeckOpen((value) => !value);
                       },
                     },

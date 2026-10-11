@@ -54,6 +54,14 @@ for (const file of files) {
 }
 
 const has = (predicate) => pool.filter(predicate);
+/** 每块「项数多到要折叠」的阈值：从 client.js 源码取，抄一份会漂移。 */
+const clientSource = fs.readFileSync(new URL('../client.js', import.meta.url), 'utf8');
+const BLOCK_PREVIEW = (() => {
+  const match = /const BLOCK_PREVIEW = \{[^}]*\};/.exec(clientSource);
+  if (match === null) throw new Error('client.js 里找不到 BLOCK_PREVIEW');
+  return new Function(`${match[0]}\n;return BLOCK_PREVIEW;`)();
+})();
+const overflowing = (turn) => turn.blocks.find((block) => (block.items?.length ?? 0) > (BLOCK_PREVIEW[block.id] ?? 6));
 /**
  * 取最后一轮，但**优先挑真的带「回答全文」的那种**：
  * 投影只给最近 8 轮带全文，挑到旧轮次的话，预览里第 ③ 格就只能显示「这轮较早，只保留提炼结果」——
@@ -74,6 +82,9 @@ const pickedTurns = [
   firstOf(has((turn) => turn.state === 'fail' || turn.state === 'interrupt' || turn.state === 'run')),
   firstOf(has((turn) => turn.blocks.length === 0)),
   firstOf(has((turn) => turn.blocks.some((block) => block.id === 'kpi'))),
+  // 有「项数多到要折叠」的块的一轮：块底部那一行（还有 N 个 ⇄ 只看前 M 个 + 收起这块）
+  // 只有这种轮次才看得到，不专门挑一轮就等于把用户要的那颗按钮藏起来了。
+  firstOf(has((turn) => turn.state === 'done' && overflowing(turn) !== undefined)),
 ].filter((turn) => turn !== null);
 const picked = [];
 for (const turn of pickedTurns) if (!picked.some((item) => item.session === turn.session && item.turn === turn.turn)) picked.push(turn);
@@ -196,20 +207,27 @@ async function renderTurns(turns, perCard) {
 
 const sections = [];
 for (const turn of picked) {
-  // 这一轮第一个信息块的 id：④ 那一格要「只点开它」。
-  const firstBlock = turn.blocks[0]?.id;
-  const openFirst = firstBlock === undefined ? {} : { [firstBlock]: true };
+  // ④ 那一格要「只点开其中一块」：优先挑这一轮里**项数多到要折叠**的那一块（它才带底部那一行），
+  // 没有这种块就点第一块。`openDetail` 同时给 showAll，让「只看前 M 个」那条分支也露出来。
+  const detailBlock = overflowing(turn) ?? turn.blocks[0];
+  const openDetail = detailBlock === undefined ? {} : { [detailBlock.id]: true };
   const deck = await renderTurns([turn], [false, {}, {}, false]);
   // ③ 只点「展开 N 个信息块」：opened 传空表 → N 个标题行铺开、每块内容都不进 DOM。
   const expanded = await renderTurns([turn], [true, {}, {}, false]);
   // ④ 展开整摞之后再点开**其中一块**：`opened` 是白名单，所以只把这一块 id 放进去。
-  const oneOpen = await renderTurns([turn], [true, openFirst, {}, false]);
+  const oneOpen = await renderTurns([turn], [true, openDetail, openDetail, false]);
   // 第 4 个 useState 是「展开回答全文」——原始记录模块删掉之后它是最后一个开关。
   const answerFull = await renderTurns([turn], [true, {}, {}, true]);
   const title = turn.title === '' ? `第 ${turn.turn} 轮` : turn.title;
   // >2 块才叠成一摞；1~2 块按设计直接铺开，两种形态的说明必须分开写，不然会让人以为抖不出叠压效果。
   const deckTag = turn.blocks.length > 2 ? '② 默认：信息块叠压成一摞' : `② 默认：只有 ${turn.blocks.length} 个块，直接铺开（不叠）`;
-  const openTag = firstBlock === undefined ? '④ 这一轮没有信息块可点开' : `④ 再点开其中一块（${escapeHtml(zh[`block.${firstBlock}`] ?? firstBlock)}）：只有它把内容铺出来`;
+  const openTag =
+    detailBlock === undefined
+      ? '④ 这一轮没有信息块可点开'
+      : `④ 再点开其中一块（${escapeHtml(zh[`block.${detailBlock.id}`] ?? detailBlock.id)}）：只有它把内容铺出来` +
+        (overflowing(turn) === undefined
+          ? ''
+          : '——块底部那一行：左边「还有 N 个 ⇄ 只看前 M 个」、右边「收起这块」（这里给的是全铺开的样子）');
   const hasAnswer = turn.full !== '';
   sections.push(`
   <section class="pv-section">

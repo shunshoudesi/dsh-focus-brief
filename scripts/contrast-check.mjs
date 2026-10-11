@@ -144,6 +144,10 @@ for (const [index, scope] of scopes.entries()) {
     ['v2 用户提问气泡正文 (label-primary 在官方气泡底上)', label, get('--dsw-specific-bubble') ?? parseColor('#edf3fe'), 4.5],
     ['v2 提问气泡里的附件占位 (label-secondary 在官方气泡底上)', secondary, get('--dsw-specific-bubble') ?? parseColor('#edf3fe'), 4.5],
     ['v2 次要文字 (label-secondary 在卡面)', secondary, layer1, 4.5],
+    // 多项块底部那两颗按钮：「收起这块」是描边 + label-secondary（用户要求的那颗），
+    // 「还有 N 个 / 只看前 M 个」是软底 + label-primary（与上面 `.dfv-more` 同款）。
+    ['v2「收起这块」按钮文字 (label-secondary 在卡面)', secondary, layer1, 4.5],
+    ['v2「还有 N 个」按钮文字 (label-primary 在 4% 分区上)', label, rowBg, 4.5],
     ['v2 卡内小字 (label-secondary 在 4% 分区上)', secondary, rowBg, 4.5],
     ['v2 状态药丸 完成 (label-primary 在 16% success)', label, tint(success, 0.16), 4.5],
     ['v2 状态药丸 进行中 (label-primary 在 16% 业务蓝)', label, tint(business, 0.16), 4.5],

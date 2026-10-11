@@ -74,6 +74,18 @@ if (allowSource === null) throw new Error('client.js 里找不到 BLOCK_ALLOW �
 const BLOCK_ALLOW = new Function(`${allowSource[0]}\n;return BLOCK_ALLOW;`)();
 console.log(`块白名单（从 client.js 源码取出）: ${[...BLOCK_ALLOW].join(' ')}`);
 
+/* 块底部那一行牵扯到的两个常量也照源码取：「项数多到要折叠」的阈值（BLOCK_PREVIEW）
+   与计数单位（BLOCK_COUNT，用来拼「只看前 5 个 / 5 条 / 5 项」）。测试里再抄一份就会漂移。 */
+const clientSource = fs.readFileSync(new URL('../client.js', import.meta.url), 'utf8');
+function constFromSource(pattern, name) {
+  const match = pattern.exec(clientSource);
+  if (match === null) throw new Error(`client.js 里找不到 ${name} —— 它被改名或删掉了？`);
+  return new Function(`${match[0]}\n;return ${name};`)();
+}
+const BLOCK_PREVIEW = constFromSource(/const BLOCK_PREVIEW = \{[^}]*\};/, 'BLOCK_PREVIEW');
+const BLOCK_COUNT = constFromSource(/const BLOCK_COUNT = \{[^}]*\};/, 'BLOCK_COUNT');
+console.log(`每块预览条数（从 client.js 源码取出）: ${Object.entries(BLOCK_PREVIEW).map(([id, n]) => `${id}:${n}`).join(' ')}`);
+
 const requireReact = (name) => {
   if (name === 'react') return react;
   throw new Error(`客户端半 require 了不该 require 的包: ${name}`);
@@ -283,6 +295,8 @@ const queues = [
   // 关键新契约：展开整摞**只铺开标题行**，每块内容仍是收起的（要点那一块才进 DOM）。
   ['展开整摞（每块仍收起）', [true, {}, {}, false]],
   ['展开整摞 + 点开 points', [true, { points: true }, {}, false]],
+  // 多项块（files 有 8 项 > 预览 5 项）：底部那一行「还有 N 个 › + 收起这块」就该出现。
+  ['展开整摞 + 点开 files（多项，未铺开）', [true, { files: true }, {}, false]],
   ['展开整摞 + 点开 points/files 且显示全部项', [true, { points: true, files: true }, { points: true, files: true }, false]],
   // 第 4 个 useState 是「展开回答全文」——原始记录模块删掉之后，它是最后一个开关。
   ['展开回答全文', [true, {}, {}, true]],
@@ -333,6 +347,26 @@ for (const turn of allTurns) {
       rowFlags.length === blocks.length && rowFlags.filter(Boolean).length === expectedBodies,
       `${rowFlags.filter(Boolean).length}/${rowFlags.length} 开，期望 ${expectedBodies}/${blocks.length}`,
     );
+    // 块底部那一行（左：项数双向切换；右：收起这块）**只在项数多到要折叠的展开块**上出现——
+    // 用户的原话是「像这种比较多的，展开后也要有收起按钮」，所以两项都要盯住：
+    // 一是它出现了，二是那个「还有 N 个」不再是单向门（点开后变成「只看前 M 个」）。
+    const showAllMap = queue[2] ?? {};
+    const overflowing =
+      open === true
+        ? blocks.filter((block) => openedMap[block.id] === true && (block.items?.length ?? 0) > (BLOCK_PREVIEW[block.id] ?? 6))
+        : [];
+    const footCount = (html.match(/class="dfv-block-foot"/g) ?? []).length;
+    check(`${tag} 只有多项展开块才有底部那一行`, footCount === overflowing.length, `期望 ${overflowing.length} 实得 ${footCount}`);
+    for (const block of overflowing) {
+      const preview = BLOCK_PREVIEW[block.id] ?? 6;
+      const unit = interpolate(zh[BLOCK_COUNT[block.id] ?? 'count.points'], { count: preview });
+      const all = showAllMap[block.id] === true;
+      const wantText = all
+        ? interpolate(zh['card.less'], { count: unit })
+        : interpolate(zh['card.more'], { count: String(block.items.length - preview) });
+      check(`${tag} ${block.id} 块底部的项数按钮是双向的（现在是「${wantText}」）`, html.includes(wantText), wantText);
+      check(`${tag} ${block.id} 块底部有「收起这块」按钮`, html.includes('class="dfv-collapse"'), '缺 .dfv-collapse');
+    }
     if (blocks.length > 0) check(`${tag} 展开态应有标题行`, html.includes('dfv-row'));
     if (blocks.length > 0) {
       check(`${tag} 每块都有图标', `, (html.match(/dfv-ico/g) ?? []).length >= blocks.length);
@@ -547,6 +581,33 @@ for (const turn of allTurns) {
       const actual = scrollDecision(state);
       check(`滚动决策：${label}`, actual === expected, `期望 ${expected} 实得 ${actual}`);
     }
+  }
+}
+
+/* ---------------- 两个开关的翻位逻辑：同一个纯函数 --------------- */
+/* 用户提的两件事（「展开后要能收起」、「还有 N 个」要能回退）都是**点下去之后**的状态转移，
+   SSR 只按固定值渲染，正好是它的盲区。所以和上面一样：把真源码抠出来跑。 */
+{
+  const match = /function toggleFlag\(map, key\) \{[\s\S]*?\n\}/.exec(clientSource);
+  check('能从源码里取到 toggleFlag', match !== null);
+  if (match !== null) {
+    const toggleFlag = new Function(`${match[0]}\n;return toggleFlag;`)();
+    const cases = [
+      ['空表 → 打开这一块', {}, 'files', true],
+      ['已打开 → 收回这一块', { files: true }, 'files', false],
+      ['只翻这一块（别的块原样）', { files: true, points: true }, 'points', false],
+      ['存着 false 也照样翻成 true（判据是 === true）', { files: false }, 'files', true],
+    ];
+    for (const [label, before, key, expected] of cases) {
+      const actual = toggleFlag({ ...before }, key)[key];
+      check(`翻位逻辑：${label}`, actual === expected, `期望 ${expected} 实得 ${actual}`);
+    }
+    check('翻位逻辑：只动这一个键', Object.keys(toggleFlag({ files: true }, 'files')).join(',') === 'files');
+    const twice = toggleFlag(toggleFlag({}, 'files'), 'files');
+    check('翻位逻辑：连点两次回到原状（「还有 N 个 ⇄ 只看前 M 个」是双向的）', twice.files === false);
+    const original = { files: true };
+    toggleFlag(original, 'files');
+    check('翻位逻辑：不改原表（React 要新引用才会重渲染）', original.files === true);
   }
 }
 

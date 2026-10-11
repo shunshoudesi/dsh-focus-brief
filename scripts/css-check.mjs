@@ -150,6 +150,12 @@ const must = [
   ['v2 键盘焦点可见', /\.dfv-row:focus-visible\{outline:2px solid/],
   // 每块的内容是「点开才出」，所以**箭头就是这一行唯一的开合信号**：展开的那一块箭头必须转下来。
   ['v2 展开的那一块箭头转下来（唯一开合信号）', /\.dfv-block\[data-closed="false"\] \.dfv-arrow\{transform:rotate\(90deg\)\}/],
+  // 多项块底部那一行：左边管项数（还有 N 个 ⇄ 只看前 M 个）、右边管这一块（收起这块）。
+  // 用户原话是「像这种比较多的，展开后也要有收起按钮」——所以他要求的两件事各对应一条：
+  // 横排布局（两条并排在块底）与「收起这块」这颗按钮本身。
+  ['v2 多项块底部那一行是横排（左边项数、右边收起）', /\.dfv-block-foot\{[^}]*display:flex/],
+  ['v2 多项块底部有「收起这块」按钮', /\.dfv-collapse\{[^}]*border:1px solid var\(--dsw-alias-border-l1\)/],
+  ['v2 块底部的收起按钮有键盘焦点环', /\.dfv-collapse:focus-visible\{outline:2px solid/],
   ['v2 根容器自带滚动', /\.dfv-root\{[^}]*overflow-y:auto/],
   // 滚轮失效那个真坑：外壳把视图放进一个「自己就是滚动容器」的 flex 纵向容器里，
   // 视图若用 height:100% 就会变成「没有可滚内容却仍是滚动容器」的元素，
