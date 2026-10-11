@@ -93,7 +93,6 @@ const WHITE = [255, 255, 255, 1];
 const CHIPS = {
   '关键数据图标 #7c5cf0': '#7c5cf0',
   '产出文件图标 #217346': '#217346',
-  '执行过程图标 #b45309': '#b45309',
   '结论建议图标 #3b82f6': '#3b82f6',
   '风险提醒图标 #e5544b': '#e5544b',
   '需要你确认图标 #c2410c': '#c2410c',
@@ -135,6 +134,10 @@ for (const [index, scope] of scopes.entries()) {
     ['v1 次要文字 (label-secondary 在卡上)', secondary, over([layer1[0], layer1[1], layer1[2], 0.72], base), 4.5],
     // ---- v2：专注视图 ----
     ['v2 标题／结论文字 (label-primary 在卡面)', label, layer1, 4.5],
+    // 回答气泡：底色就是官方对话那条气泡自己的 token（浅色 #edf3fe / 深色 #2c2c2e），字色是 label-primary。
+    // 取不到 token 时退回我写在 CSS 里的兜底色，保证这一项永远算得出来。
+    ['v2 回答气泡正文 (label-primary 在官方气泡底上)', label, get('--dsw-specific-bubble') ?? parseColor('#edf3fe'), 4.5],
+    ['v2 回答气泡里的「展开/收起」按钮 (label-secondary)', secondary, get('--dsw-specific-bubble') ?? parseColor('#edf3fe'), 4.5],
     ['v2 次要文字 (label-secondary 在卡面)', secondary, layer1, 4.5],
     ['v2 卡内小字 (label-secondary 在 4% 分区上)', secondary, rowBg, 4.5],
     ['v2 状态药丸 完成 (label-primary 在 16% success)', label, tint(success, 0.16), 4.5],

@@ -153,6 +153,12 @@ const must = [
   // 那时必须由视图自己滚；而在活跃期由外壳滚。两半都在，才两种配置都对。
   ['v2 根容器保留自己滚的能力（overlay 配置下包装层会裁切）', /\.dfv-root\{[^}]*overflow-y:auto/],
   ['v2 根容器保留链式滚动（overscroll-behavior:auto）', /\.dfv-root\{[^}]*overscroll-behavior:auto/],
+  // 回答气泡照官方对话那条气泡的样子：用官方自己的 `--dsw-specific-bubble`（浅蓝底）+ label-primary（黑字）。
+  // 这个 token 不在官方清单里，所以必须带兜底色（下面 token 存在性那一段也会再查一次）。
+  ['回答气泡用官方气泡底色 token（带兜底）', /\.dfv-bubble\{[^}]*background-color:var\(--dsw-specific-bubble,#edf3fe\)/],
+  ['回答气泡圆角用官方 radius token（带兜底）', /\.dfv-bubble\{[^}]*border-radius:var\(--dsw-radius-md,12px\)/],
+  ['回答正文渲染成元素（围栏代码块保留换行）', /\.dfv-pre\{[^}]*white-space:pre-wrap/],
+  ['回答正文里的表格有边框', /\.dfv-table th,\.dfv-table td\{[^}]*border:1px solid var\(--dsw-alias-border-l1\)/],
   // 踩过的坑：说明文字是 <span>，`margin-top` 对行内元素无效，结果和工具名粘在一行
   // （`改文件 · index.js · 完成The file … has been updated successfully.`）。必须独占一行。
   ['v2 原始记录的说明独占一行', /\.dfv-raw-note\{display:block/],

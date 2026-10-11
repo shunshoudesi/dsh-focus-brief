@@ -140,15 +140,26 @@ function headlineOf(text) {
     if (trimmed === '') continue;
     // 结构线（围栏、分隔线）不是「结论」：拿它当总卡那一行会非常难看。
     if (isMarkdownNoise(trimmed.split('\n')[0].trim())) continue;
+    // markdown 表格也不是结论。截图里亲眼见过：一轮的结论行被压成了
+    // `| 检查 | 结果 | |---|---|---| 三块笔记数与旧库逐块对比 | 28 / 32 / 31 —— 完全一致 | …`，
+    // 表格线、分隔行、竖线全挤在一行里，读的人只能跳过它。
+    if (trimmed.startsWith('|')) continue;
     const line = plain(trimmed);
     if (line === '') continue;
-    if (fallback === '') fallback = line;
+    // 整个段落就是一条列表时，结论取**第一条**列表项，而不是把整张列表压平：
+    // 读一遍真实语料时看到过 `- 契约是 OpenAI 定的… - 实现是一堆… - …` 这种压平结果，
+    // 三个要点挤在一行、后面还被截断，谁也没法读。
+    const firstLine = trimmed.split('\n')[0].trim();
+    const bullet = /^(?:[-*+]|\d+[.)])\s+(.+)$/.exec(firstLine);
+    const candidate = bullet === null ? line : plain(bullet[1]);
+    if (candidate === '') continue;
+    if (fallback === '') fallback = candidate;
     if (isHeadingOnly(part)) {
       if (firstHeading === '') firstHeading = line;
       continue;
     }
-    if (firstProse === '') firstProse = line;
-    if (line.length >= MIN_HEADLINE) return clip(line, HEADLINE_LIMIT);
+    if (firstProse === '') firstProse = candidate;
+    if (candidate.length >= MIN_HEADLINE) return clip(candidate, HEADLINE_LIMIT);
   }
   if (firstProse !== '') return clip(firstProse, HEADLINE_LIMIT);
   if (firstHeading !== '') return clip(firstHeading, HEADLINE_LIMIT);

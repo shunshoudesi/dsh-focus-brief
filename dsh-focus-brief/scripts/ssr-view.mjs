@@ -269,11 +269,13 @@ const allTurns = [...realTurns, ...synthetic];
 console.log(`待渲染轮次：真实 ${realTurns.length} + 合成 ${synthetic.length}`);
 
 const queues = [
-  ['叠压（默认）', [false, {}, {}, false]],
-  ['展开整摞', [true, {}, {}, false]],
-  ['单块折叠', [true, { points: true }, {}, false]],
-  ['展开全部项', [true, {}, { points: true, files: true }, false]],
-  ['打开原始记录', [true, {}, {}, true]],
+  ['叠压（默认）', [false, {}, {}, false, false]],
+  ['展开整摞', [true, {}, {}, false, false]],
+  ['单块折叠', [true, { points: true }, {}, false, false]],
+  ['展开全部项', [true, {}, { points: true, files: true }, false, false]],
+  ['打开原始记录', [true, {}, {}, true, false]],
+  // 第 5 个 useState 是「展开回答全文」。**它必须排在最后**，前四个下标才对得上。
+  ['展开回答全文', [true, {}, {}, false, true]],
 ];
 
 let renders = 0;
@@ -304,18 +306,27 @@ for (const turn of allTurns) {
     const blocks = (Array.isArray(turn.blocks) ? turn.blocks : []).filter((block) => BLOCK_ALLOW.has(block.id));
     const fanned = turn.state !== 'done' || blocks.length <= 2;
     const open = queue[0] === true || fanned;
+    // 五个开关的下标：deckOpen=0 / closed=1 / showAll=2 / rawOpen=3 / fullOpen=4。
+    const rawOpen = queue[3] === true;
+    const fullOpen = queue[4] === true;
     check(`${tag} 折叠态不应渲染正文`, !(open === false && html.includes('dfv-body')));
     if (blocks.length > 0) check(`${tag} 展开态应有标题行`, html.includes('dfv-row'));
     if (blocks.length > 0) {
       check(`${tag} 每块都有图标', `, (html.match(/dfv-ico/g) ?? []).length >= blocks.length);
     }
     if (turn.title !== '') check(`${tag} 应渲染标题`, html.includes(escapeHtml(turn.title.slice(0, 8))));
-    if (turn.title === '' && turn.headline !== '' && blocks.length <= 2 && queue[4] === false) {
+    if (turn.title === '' && turn.headline !== '' && blocks.length <= 2 && rawOpen === false && fullOpen === false) {
       // 标题位只在该轮没有标题时才用「第 N 轮」兜底，绝不拿结论行去填——那会让同一句话出现两次。
       check(`${tag} 无标题时标题位用「第 N 轮」`, html.includes(escapeHtml(zh['card.turnFallback'].replace('{turn}', String(turn.turn)))));
       const needle = escapeHtml(turn.headline.slice(0, 10));
-      const occurrences = html.split(needle).length - 1;
-      check(`${tag} 结论行只该出现一次（不许在标题位复制）`, occurrences === 1, `${occurrences} 次`);
+      const bubbleAt = html.indexOf('dfv-bubble');
+      const blocksAt = html.indexOf('dfv-blocks');
+      // 只比「回答气泡之前」的头部：结论里提到的产出文件名会在下面的「产出文件」块里再出现一次，
+      // 那是应该的（那块的职责就是列出这个文件），不能算重复。
+      check(`${tag} 标题位／卡片头部不许复制结论行`, bubbleAt < 0 || !html.slice(0, bubbleAt).includes(needle));
+      const inBubble = bubbleAt < 0 ? '' : html.slice(bubbleAt, blocksAt < 0 ? html.length : blocksAt);
+      const occurrences = inBubble.split(needle).length - 1;
+      check(`${tag} 回答气泡里结论只该出现一次`, occurrences === 1, `${occurrences} 次`);
     }
     if (turn.title === '' && turn.headline === '' && blocks.length === 0 && turn.chars === 0) {
       check(`${tag} 全空轮次应显示占位`, html.includes(zh['card.turnFallback'].replace('{turn}', String(turn.turn))));
@@ -347,21 +358,111 @@ for (const turn of allTurns) {
       check(`${tag} 失败原因该显示就显示、同义就不显示`, suppressed ? !html.includes(reasonLabel) : html.includes(reasonLabel), `${reasonLabel} suppressed=${suppressed}`);
     }
     // 「不要执行日志」是硬要求：宿主推来的执行过程块必须整块消失——时间线、圆点、图标都不许出现。
-    // 这里只查结构标记，不查「执行过程」这四个字：真实回答的正文里也可能出现这四个字。
-    check(`${tag} 不该渲染执行日志的时间线`, !html.includes('dfv-step'));
+    // 这里只查**结构标记**（class / 属性），不查裸字符串：真实回答的正文里会提到 `dfv-step-open` 这种
+    // 插件自己的类名（第 32 轮就是），用裸字符串查会把它误判成"渲染了执行日志"。
+    check(`${tag} 不该渲染执行日志的时间线`, !html.includes('class="dfv-step'));
     check(`${tag} 不该渲染执行日志的图标`, !html.includes('data-id="steps"'));
-    if (queue[4] === true && turn.rawTotal > 0) {
-      check(`${tag} 打开原始记录应渲染行`, html.includes('dfv-raw-body') && html.includes('dfv-raw-item'));
+    // 回答气泡：这一轮的回答就在卡里。原始记录里那一行 answer 就是这一轮的最终回答原文。
+    // （踩过的坑：这里原先写的是 queue[4]，而「打开原始记录」的开关是第 4 个 useState＝下标 3，
+    //   于是那几条断言**一次都没跑过**。现在 5 个开关各有各的下标，rawOpen=3、fullOpen=4。）
+    const answerRow = (Array.isArray(turn.raw) ? turn.raw : []).find((row) => row.kind === 'answer');
+    const fullText = answerRow === undefined ? '' : answerRow.text;
+    check(`${tag} 回答应装在气泡里`, html.includes('dfv-bubble'));
+    if (fullText !== '') {
+      check(`${tag} 回答全文按钮应带无障碍名称`, html.includes(escapeHtml(zh['a11y.full'].replace('{count}', String(fullText.length)))));
+      if (fullOpen) {
+        // 注意：`dfv-full-toggle`（按钮）里也含 `dfv-full` 这几个字母，所以这里查的是 class 名本身。
+        check(`${tag} 展开回答全文应渲染全文`, html.includes('class="dfv-full"'));
+        // 回答正文要渲染成**元素**，不是把 markdown 源码铺出来（177 轮真实语料里出现过的结构都要覆盖）。
+        // 期望值必须按**去掉围栏内容之后**的行来数：围栏里是原样保留的代码/目录树，
+        // 里面的 `##`、`- `、`|---|` 都不是结构（踩过：拿全文数标题，得到 14 对 9）。
+        const fenceLines = fullText.split('\n').filter((line) => /^```/.test(line.trim())).length;
+        const outsideLines = [];
+        let inFence = false;
+        for (const line of fullText.split('\n')) {
+          if (/^```/.test(line.trim())) {
+            inFence = !inFence;
+            continue;
+          }
+          if (!inFence) outsideLines.push(line);
+        }
+        const outside = outsideLines.join('\n');
+        const countIn = (re) => (outside.match(re) ?? []).length;
+        const countOut = (re) => (html.match(re) ?? []).length;
+        check(`${tag} 小标题数量对得上`, countIn(/^#{1,6}\s+\S/gm) === countOut(/class="dfv-md-h"/g), `${countIn(/^#{1,6}\s+\S/gm)} vs ${countOut(/class="dfv-md-h"/g)}`);
+        // 围栏行是奇数时（真实语料里有一条孤零零的 ```），renderer 会把后面全部当代码吃进去，
+        // 所以期望值是 ceil 不是 floor。
+        check(`${tag} 围栏代码块数量对得上`, Math.ceil(fenceLines / 2) === countOut(/class="dfv-pre"/g), `${Math.ceil(fenceLines / 2)} vs ${countOut(/class="dfv-pre"/g)}`);
+        check(`${tag} 表格数量对得上`, countIn(/^\|[\s:|-]+\|$/gm) === countOut(/class="dfv-table"/g), `${countIn(/^\|[\s:|-]+\|$/gm)} vs ${countOut(/class="dfv-table"/g)}`);
+        check(`${tag} 分隔线数量对得上`, countIn(/^([-*_])\s*(?:\1\s*){2,}$/gm) === countOut(/class="dfv-md-rule"/g), `${countIn(/^([-*_])\s*(?:\1\s*){2,}$/gm)} vs ${countOut(/class="dfv-md-rule"/g)}`);
+        if (/^(?:[-*+]|\d+[.)])\s+\S/m.test(outside)) check(`${tag} 列表应渲染成列表`, countOut(/class="dfv-md-list"/g) >= 1);
+        if (/^>\s?\S/m.test(outside)) check(`${tag} 引用应渲染成引用`, countOut(/class="dfv-md-quote"/g) >= 1);
+        // 反向：源码标记不许原样露出来（围栏内部原样保留，所以先摘掉 <pre>）。
+        // 区间只取到「收起全文」那个按钮为止：按钮文案和它的 aria-label 不属于回答正文，
+        // 混进来会让下面的字数不变量凭空多出十几个字。
+        const toggleAt = html.indexOf('class="dfv-full-toggle"');
+        const bubbleEnd = toggleAt >= 0 ? toggleAt : html.indexOf('dfv-blocks') < 0 ? html.length : html.indexOf('dfv-blocks');
+        const fullAt = html.indexOf('class="dfv-full"');
+        // 从外层 <div 开始切：从 class 中间切会把 `class="dfv-full"` 这几个字留在文本里，
+        // 字数不变量会凭空多出十几个「字母」。
+        const bubble = html.slice(html.lastIndexOf('<div', fullAt), bubbleEnd);
+        const outsidePre = bubble.replace(/<pre[\s\S]*?<\/pre>/g, '');
+        // 先把块级元素的收尾换成换行，这样「行首」判断才成立（否则段落会被拼成一行）。
+        const bubbleText = outsidePre.replace(/<\/(?:p|div|li|tr|h[1-6])>/g, '\n$&').replace(/<[^>]*>/g, '');
+        check(`${tag} 气泡里不该残留表格分隔行`, !/^\|[\s:|-]+\|$/m.test(bubbleText));
+        // 只查**行首**的围栏：真实回答的正文里会直接把「```json 围栏能剥出来」写进句子里（第 88 轮就是），
+        // 那不是渲染漏了，是内容本身。
+        check(`${tag} 气泡里不该残留行首代码围栏`, !/^```/m.test(bubbleText));
+        // 内容没丢：从回答里挑几条**不含任何 markdown 标记**的行，断言它们真的出现了
+        // （在**完整**气泡文本里找，不能只看去掉 <pre> 的那部分——目录树这类内容就在围栏里）。
+        // 先把 HTML 实体还原再数字数：`&quot;` 里的 quot 会被当成 4 个字母，凭空多算。
+        const unescapeHtml = (value) => value.replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+        const allText = unescapeHtml(bubble.replace(/\s[a-z-]+="[^"]*"/g, '').replace(/<\/(?:p|div|li|tr|pre|h[1-6])>/g, '\n$&').replace(/<[^>]*>/g, ''));
+        let sampled = 0;
+        // 从回答的**开头／中间／结尾**各挑一条不含 markdown 标记的行，断言它们真的出现了：
+        // 只抽开头会漏掉「渲染到一半断掉」这类错误。
+        const candidates = fullText
+          .split('\n')
+          .map((line) => line.trim().replace(/^(?:[-*+]|\d+[.)])\s+/, ''))
+          .filter((content) => content.length >= 14 && !/[#*`|>[\]]/.test(content));
+        const picks = [...new Set([candidates[0], candidates[Math.floor(candidates.length / 2)], candidates.at(-1)])].filter((item) => item !== undefined);
+        for (const content of picks) {
+          const needleText = content.slice(0, 12);
+          sampled++;
+          check(`${tag} 回答正文内容没丢（第 ${sampled} 条抽样）`, allText.includes(needleText), needleText);
+        }
+        // 总量只做**下界**：链接地址在真实渲染里不以文字出现（只进 title），
+        // 所以「原文去掉地址之后的字数」是渲染结果的下界；上界不比——链接标签、
+        // 表格单元格这些在两边算出来的字母数本来就不同口径，卡死上界只会制造假失败。
+        const lettersOf = (value) => (value.match(/[0-9A-Za-z\u3400-\u9fff]/g) ?? []).length;
+        const expectedLetters = lettersOf(fullText.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1'));
+        check(`${tag} 渲染出来的正文没有丢内容`, lettersOf(allText) >= expectedLetters * 0.9, `下界 ${Math.round(expectedLetters * 0.9)} 实得 ${lettersOf(allText)}`);
+        // 展开时只画全文：全文本来就从那句结论开始，两处都画就是同屏重复。
+        check(`${tag} 展开全文时不该再画那句结论`, !html.includes('dfv-value'));
+        check(`${tag} 展开全文时应给「收起全文」`, html.includes(zh['card.fullClose']));
+      } else {
+        check(`${tag} 未展开时应给「展开回答全文」`, html.includes(zh['card.fullOpen'].replace('{count}', String(fullText.length))));
+        check(`${tag} 未展开时应只有那句结论`, html.includes('dfv-value') && !html.includes('class="dfv-full"'));
+      }
+    } else {
+      check(`${tag} 没有全文时不该给「展开回答全文」`, !html.includes('dfv-full-toggle'));
     }
-    if (turn.truncated === true && queue[4] === true) {
+    if (rawOpen && turn.rawTotal > 0) {
+      const rows = Array.isArray(turn.raw) ? turn.raw : [];
+      check(`${tag} 打开原始记录应渲染容器`, html.includes('dfv-raw-body'));
+      // 行和提示是二选一：带原文的轮次渲染行；更早的轮次只剩提炼结果，渲染的是那句提示，不是空壳。
+      if (rows.length > 0) check(`${tag} 有原文时应渲染原始记录行`, html.includes('dfv-raw-item'));
+      else check(`${tag} 没有原文时应渲染提示而不是空壳`, html.includes('dfv-raw-hint'));
+    }
+    if (turn.truncated === true && rawOpen) {
       check(`${tag} 截断提示应出现`, html.includes(zh['card.truncated']));
     }
-    if (turn.rawOmitted === true && queue[4] === true) {
+    if (turn.rawOmitted === true && rawOpen) {
       check(`${tag} 省略提示应出现`, html.includes(zh['card.rawOmitted']));
     }
   }
   // 没有输入框接口时不该出现死按钮。
-  const htmlNoInput = await renderView([turn], [false, {}, {}, false], false);
+  const htmlNoInput = await renderView([turn], [false, {}, {}, false, false], false);
   check(`第${turn.turn}轮 无输入框接口时不渲染继续追问`, !htmlNoInput.includes(zh['card.followUp']));
 }
 

@@ -55,6 +55,8 @@ window.__ModuleLoader__.load({
       'card.countPoints': '要点 {count}',
       'card.countAsks': '待定 {count}',
       'card.empty': '（本轮没有正文可提炼）',
+      'card.fullOpen': '展开回答全文 {count} 字',
+      'card.fullClose': '收起全文',
       'card.meta': '{tools} 次工具调用 · 正文 {chars} 字',
       'card.turnFallback': '第 {turn} 轮',
       'state.done': '完成',
@@ -98,6 +100,7 @@ window.__ModuleLoader__.load({
       'step.done': '完成',
       'step.fail': '失败',
       'a11y.block': '{label}，{count}',
+      'a11y.full': '回答全文，共 {count} 字',
       'a11y.raw': '原始记录，{count} 条',
       'time.minutes': '{hour}:{minute}',
     };
@@ -115,6 +118,8 @@ window.__ModuleLoader__.load({
       'card.countPoints': '{count} points',
       'card.countAsks': '{count} to decide',
       'card.empty': '(No prose to distill in this turn)',
+      'card.fullOpen': 'Show the full answer ({count} chars)',
+      'card.fullClose': 'Collapse the answer',
       'card.meta': '{tools} tool calls · {chars} chars',
       'card.turnFallback': 'Turn {turn}',
       'state.done': 'Done',
@@ -158,6 +163,7 @@ window.__ModuleLoader__.load({
       'step.done': 'done',
       'step.fail': 'failed',
       'a11y.block': '{label}, {count}',
+      'a11y.full': 'Full answer, {count} characters',
       'a11y.raw': 'Raw log, {count} rows',
       'time.minutes': '{hour}:{minute}',
     };
@@ -207,8 +213,36 @@ window.__ModuleLoader__.load({
       '.dfv-state{flex:none;font-size:11px;font-weight:600;line-height:18px;padding:1px 8px;border-radius:999px;background-color:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-primary);white-space:nowrap}',
       /* 各状态的兜底底色：color-mix 不可用时药丸只是没有色相，文字照样清楚。 */
       '.dfv-state[data-state="done"],.dfv-state[data-state="run"],.dfv-state[data-state="wait"],.dfv-state[data-state="fail"],.dfv-state[data-state="interrupt"]{background-color:var(--dsw-alias-bg-layer-2)}',
-      '.dfv-value{margin-top:9px;font-size:15px;line-height:1.55;color:var(--dsw-alias-label-primary);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}',
+      '.dfv-value{margin:0;font-size:15px;line-height:1.55;color:var(--dsw-alias-label-primary);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}',
       '.dfv-value[data-empty="true"]{color:var(--dsw-alias-label-secondary);font-size:13.5px}',
+      /* ---------- 回答气泡：照官方对话里那条气泡的样子 ---------- */
+      /* 底色用官方气泡自己的 token `--dsw-specific-bubble`（浅色 #edf3fe、深色 #2c2c2e），
+         字色用 label-primary（浅色下就是黑字）。它**不在官方 token 清单里**，所以带兜底色：
+         主题改名时退回浅蓝，而不是变成透明。圆角用 radius-md(12px) 而不是官方气泡的
+         radius-xl(20px)——气泡现在住在 16px 圆角的卡片里，20px 会顶破卡片的圆角。 */
+      '.dfv-bubble{margin:0 16px 12px;background-color:var(--dsw-specific-bubble,#edf3fe);border-radius:var(--dsw-radius-md,12px);padding:10px 12px}',
+      '.dfv-full{font-size:13.5px;line-height:21px;color:var(--dsw-alias-label-primary);overflow-wrap:anywhere}',
+      /* 回答正文里的 markdown 元素（自己渲染的那一层，见 markdownNodes）。 */
+      '.dfv-full > :first-child{margin-top:0}',
+      '.dfv-md-p{margin:8px 0 0}',
+      '.dfv-md-h{margin:12px 0 0;font-weight:700;line-height:20px}',
+      '.dfv-md-h[data-level="1"]{font-size:15px}',
+      '.dfv-md-h[data-level="2"]{font-size:14px}',
+      '.dfv-md-h[data-level="3"],.dfv-md-h[data-level="4"],.dfv-md-h[data-level="5"],.dfv-md-h[data-level="6"]{font-size:13.5px}',
+      '.dfv-md-list{margin:8px 0 0;padding-left:20px}',
+      '.dfv-md-item{margin-top:3px}',
+      '.dfv-md-quote{margin:8px 0 0;padding-left:10px;border-left:2px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary)}',
+      '.dfv-md-rule{margin:12px 0 0;border:0;border-top:1px solid var(--dsw-alias-border-l2)}',
+      '.dfv-pre{margin:8px 0 0;padding:8px 10px;border-radius:8px;background-color:rgba(0,0,0,.05);background-color:color-mix(in srgb,var(--dsw-alias-label-primary) 8%,transparent);font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px;line-height:18px;color:var(--dsw-alias-label-primary);white-space:pre-wrap;overflow-wrap:anywhere}',
+      '.dfv-inline-code{padding:1px 4px;border-radius:4px;background-color:rgba(0,0,0,.05);background-color:color-mix(in srgb,var(--dsw-alias-label-primary) 8%,transparent);font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12.5px}',
+      /* 链接不做成可点击的（拿不到系统打开接口），只加下划线提示这是链接，地址在 title 里。 */
+      '.dfv-link{text-decoration:underline;text-decoration-style:dotted;text-underline-offset:2px}',
+      '.dfv-table{width:100%;margin:8px 0 0;border-collapse:collapse;font-size:12.5px;line-height:18px}',
+      '.dfv-table th,.dfv-table td{padding:4px 8px;border:1px solid var(--dsw-alias-border-l1);text-align:left;vertical-align:top}',
+      '.dfv-table th{background-color:rgba(0,0,0,.03);background-color:color-mix(in srgb,var(--dsw-alias-label-primary) 5%,transparent);font-weight:600}',
+      '.dfv-full-toggle{margin-top:8px;border:0;padding:0;background-color:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:11.5px;line-height:18px;cursor:pointer}',
+      '.dfv-full-toggle:hover{color:var(--dsw-alias-label-primary)}',
+      '.dfv-full-toggle:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}',
 
       /* ---------- 信息块：收起是叠压一摞，展开是纵向手风琴 ---------- */
       '.dfv-blocks{padding:10px 14px 14px;position:relative}',
@@ -310,7 +344,7 @@ window.__ModuleLoader__.load({
       '}',
 
       /* ---------- 高对比模式与减少动效 ---------- */
-      '@media (forced-colors:active){.dfv-card,.dfv-blocks[data-open="false"] .dfv-block,.dfv-blocks[data-open="true"] .dfv-block{border-color:CanvasText;box-shadow:none}.dfv-ico,.dfv-file-ico{background-color:Canvas;color:CanvasText;border:1px solid CanvasText}}',
+      '@media (forced-colors:active){.dfv-card,.dfv-blocks[data-open="false"] .dfv-block,.dfv-blocks[data-open="true"] .dfv-block{border-color:CanvasText;box-shadow:none}.dfv-ico,.dfv-file-ico{background-color:Canvas;color:CanvasText;border:1px solid CanvasText}.dfv-bubble{border:1px solid CanvasText}}',
       '@media (prefers-reduced-motion:reduce){.dfv-block,.dfv-arrow{transition:none}}',
     ].join('');
 
@@ -402,6 +436,169 @@ window.__ModuleLoader__.load({
       } catch {
         /* 接口形状变了就当按钮不存在 */
       }
+    }
+
+    /* ==================================================================== */
+    /* 回答正文的极简 markdown 渲染                                          */
+    /* ==================================================================== */
+
+    /**
+     * 为什么自己写这一层：官方那套 markdown 渲染器住在 `@deepseek-ai/*` 包里，
+     * 而客户端插件**禁止 require 任何 `@deepseek-ai/*`**（见 README 的接口限制）；
+     * 直接把原文铺进气泡里，看到的就是 `## 一、…`、`| 旧名 | 标准名 |`、`|---|---|`、
+     * ``` 围栏、`**加粗**` 这些**写作格式**——等于把模型写给人看的东西又还原成源码。
+     *
+     * 覆盖范围按真实语料定（177 轮里实际出现过的东西）：小标题、无序/有序列表、
+     * 表格、围栏代码块、行内加粗与行内代码、链接、引用、分隔线、普通段落。
+     * **不做的**：嵌套列表的层级（只按行内的缩进加一点左边距）、HTML 直通、脚注、任务列表的勾选框。
+     * 链接不做成可点击的：客户端插件拿不到系统打开接口，画一个能点却没反应的链接比不给更糟。
+     */
+    const INLINE_MARK = /(\*\*[^*\n]+\*\*|`[^`\n]+`|\[[^\]\n]+\]\([^)\n]*\))/g;
+
+    /** 行内：加粗 / 行内代码 / 链接（链接只显示文字，地址放进 title）。 */
+    function inlineNodes(text, keyBase) {
+      const out = [];
+      let last = 0;
+      for (const match of String(text).matchAll(INLINE_MARK)) {
+        if (match.index > last) out.push(String(text).slice(last, match.index));
+        const token = match[0];
+        if (token.startsWith('**')) out.push(h('strong', { key: `${keyBase}-${out.length}` }, token.slice(2, -2)));
+        else if (token.startsWith('`')) out.push(h('code', { className: 'dfv-inline-code', key: `${keyBase}-${out.length}` }, token.slice(1, -1)));
+        else {
+          const label = /^\[([^\]]+)\]/.exec(token)[1];
+          out.push(h('span', { className: 'dfv-link', title: token, key: `${keyBase}-${out.length}` }, label));
+        }
+        last = match.index + token.length;
+      }
+      if (last < String(text).length) out.push(String(text).slice(last));
+      return out;
+    }
+
+    /** 表格行 → 单元格数组（去掉首尾的空竖线与分隔用的竖线）。 */
+    function cellsOf(line) {
+      const parts = line.replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell) => cell.trim());
+      return parts.length === 0 ? [''] : parts;
+    }
+
+    const isFence = (line) => /^```/.test(line.trim());
+    const isRule = (line) => /^([-*_])\s*(?:\1\s*){2,}$/.test(line.trim());
+    const isBullet = (line) => /^(?:[-*+]|\d+[.)])\s+\S/.test(line.trim());
+    const isHeading = (line) => /^#{1,6}\s+\S/.test(line.trim());
+
+    /** 正文 → 元素数组。只认上面那几种结构，其余按段落。 */
+    function markdownNodes(text) {
+      const lines = String(text).split('\n');
+      const nodes = [];
+      const push = (node) => {
+        nodes.push(node);
+        return nodes.length;
+      };
+      let index = 0;
+      while (index < lines.length) {
+        const trimmed = lines[index].trim();
+        if (trimmed === '') {
+          index++;
+          continue;
+        }
+        const key = String(nodes.length);
+
+        // 围栏代码块：``` 之间的内容原样进 <pre>（保留缩进与换行）。
+        if (isFence(lines[index])) {
+          const body = [];
+          index++;
+          while (index < lines.length && !isFence(lines[index])) {
+            body.push(lines[index]);
+            index++;
+          }
+          index++;
+          push(h('pre', { className: 'dfv-pre', key }, body.join('\n')));
+          continue;
+        }
+
+        // 表格：本行以 | 开头、下一行是 |---|---| 才算（否则只是一行普通文字）。
+        if (trimmed.startsWith('|') && index + 1 < lines.length && /^\|[\s:|-]+\|$/.test(lines[index + 1].trim())) {
+          const head = cellsOf(trimmed);
+          index += 2;
+          const rows = [];
+          while (index < lines.length && lines[index].trim().startsWith('|')) {
+            rows.push(cellsOf(lines[index].trim()));
+            index++;
+          }
+          push(
+            h(
+              'table',
+              { className: 'dfv-table', key },
+              h('thead', null, h('tr', null, head.map((cell, cellIndex) => h('th', { key: String(cellIndex) }, inlineNodes(cell, `${key}-h-${cellIndex}`))))),
+              h(
+                'tbody',
+                null,
+                rows.map((row, rowIndex) =>
+                  h('tr', { key: String(rowIndex) }, row.map((cell, cellIndex) => h('td', { key: String(cellIndex) }, inlineNodes(cell, `${key}-${rowIndex}-${cellIndex}`)))),
+                ),
+              ),
+            ),
+          );
+          continue;
+        }
+
+        const heading = /^(#{1,6})\s+(.+)$/.exec(trimmed);
+        if (heading !== null) {
+          push(h('div', { className: 'dfv-md-h', 'data-level': heading[1].length, key }, inlineNodes(heading[2], `${key}-h`)));
+          index++;
+          continue;
+        }
+
+        if (isRule(trimmed)) {
+          push(h('hr', { className: 'dfv-md-rule', key }));
+          index++;
+          continue;
+        }
+
+        if (isBullet(lines[index])) {
+          const ordered = /^\d+[.)]\s+/.test(trimmed);
+          const items = [];
+          while (index < lines.length && isBullet(lines[index])) {
+            // 续行（缩进更深的非空行）挂回上一条，别丢内容。
+            let item = lines[index].trim().replace(/^(?:[-*+]|\d+[.)])\s+/, '');
+            index++;
+            while (index < lines.length && lines[index].trim() !== '' && !isBullet(lines[index]) && !isHeading(lines[index]) && !isFence(lines[index]) && /^\s{2,}\S/.test(lines[index])) {
+              item += ` ${lines[index].trim()}`;
+              index++;
+            }
+            items.push(item);
+          }
+          push(
+            h(
+              ordered ? 'ol' : 'ul',
+              { className: 'dfv-md-list', key },
+              items.map((item, itemIndex) => h('li', { className: 'dfv-md-item', key: String(itemIndex) }, inlineNodes(item, `${key}-${itemIndex}`))),
+            ),
+          );
+          continue;
+        }
+
+        if (trimmed.startsWith('>')) {
+          const quoted = [];
+          while (index < lines.length && lines[index].trim().startsWith('>')) {
+            quoted.push(lines[index].trim().replace(/^>\s?/, ''));
+            index++;
+          }
+          push(h('div', { className: 'dfv-md-quote', key }, inlineNodes(quoted.join(' '), `${key}-q`)));
+          continue;
+        }
+
+        // 段落：连着吃到下一个空行或下一个结构开头。
+        const paragraph = [trimmed];
+        index++;
+        while (index < lines.length) {
+          const next = lines[index].trim();
+          if (next === '' || isFence(lines[index]) || isHeading(lines[index]) || isBullet(lines[index]) || isRule(next) || next.startsWith('>') || (next.startsWith('|') && index + 1 < lines.length && /^\|[\s:|-]+\|$/.test(lines[index + 1].trim()))) break;
+          paragraph.push(next);
+          index++;
+        }
+        push(h('p', { className: 'dfv-md-p', key }, inlineNodes(paragraph.join(' '), `${key}-p`)));
+      }
+      return nodes;
     }
 
     /* ==================================================================== */
@@ -720,6 +917,9 @@ function scrollDecision(state) {
       const [closed, setClosed] = React.useState({});
       const [showAll, setShowAll] = React.useState({});
       const [rawOpen, setRawOpen] = React.useState(false);
+      // 回答全文是否展开。**这个 hook 必须排在最后**：SSR 回归用「按下标返回固定值」的垫片驱动交互状态，
+      // 加在末尾，原来那 4 个下标才对得上。
+      const [fullOpen, setFullOpen] = React.useState(false);
 
       const blocks = (Array.isArray(turn.blocks) ? turn.blocks : []).filter((block) => BLOCK_ALLOW.has(block.id));
       // 设计稿的边界规则：非完成态不叠、直接铺开（F1）；只有一两块也不叠（F3）。
@@ -749,7 +949,34 @@ function scrollDecision(state) {
           h('span', { className: 'dfv-title' }, turn.title !== '' ? turn.title : t('card.turnFallback', { turn: turn.turn })),
           h('span', { className: 'dfv-state', 'data-state': pillState }, pillText),
         ),
-        h('div', { className: 'dfv-value', 'data-empty': headline === '' ? 'true' : 'false' }, headline === '' ? t('card.empty') : headline),
+      );
+
+      // 「回答」就在卡里：默认是那句话结论，点开换成全文。
+      // 全文直接取原始记录里那一行（kind === 'answer'），**不额外往投影里塞一份副本**——
+      // 那一行本来就是这一轮的最终回答原文（最近 8 轮带，更早的轮次只留提炼结果）。
+      const answerRow = (Array.isArray(turn.raw) ? turn.raw : []).find((row) => row.kind === 'answer');
+      const full = answerRow !== undefined && typeof answerRow.text === 'string' ? answerRow.text : '';
+      const showFull = fullOpen && full !== '';
+      // 展开时只画全文：全文本来就从那句结论开始，两行都画就是同屏重复。
+      const answer = h(
+        'div',
+        { className: 'dfv-bubble', 'data-open': showFull ? 'true' : 'false' },
+        showFull
+          ? h('div', { className: 'dfv-full' }, markdownNodes(full))
+          : h('div', { className: 'dfv-value', 'data-empty': headline === '' ? 'true' : 'false' }, headline === '' ? t('card.empty') : headline),
+        full === ''
+          ? null
+          : h(
+              'button',
+              {
+                type: 'button',
+                className: 'dfv-full-toggle',
+                'aria-expanded': showFull,
+                'aria-label': t('a11y.full', { count: full.length }),
+                onClick: () => setFullOpen((value) => !value),
+              },
+              showFull ? t('card.fullClose') : t('card.fullOpen', { count: full.length }),
+            ),
       );
 
       const rows = blocks.map((block) => {
@@ -824,6 +1051,7 @@ function scrollDecision(state) {
         'div',
         { className: 'dfv-card', 'data-turn': turn.turn, 'data-state': turn.state },
         head,
+        answer,
         blocksNode,
         turn.rawTotal === 0 && turn.rawOmitted !== true ? null : h(RawLog, { turn, t, open: rawOpen, onToggle: () => setRawOpen((value) => !value) }),
         foot,

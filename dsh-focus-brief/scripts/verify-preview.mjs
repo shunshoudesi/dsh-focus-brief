@@ -37,6 +37,7 @@ const must = [
   ['插件 CSS：叠压', /\.dfv-blocks\[data-open="false"\] \.dfv-block\{[^}]*margin-bottom:-6px/],
   ['插件 CSS：手风琴展开', /\.dfv-blocks\[data-open="true"\] \.dfv-block\{/],
   ['插件 CSS：原始记录说明独占一行', /\.dfv-raw-note\{display:block/],
+  ['插件 CSS：回答气泡（官方气泡底色 token）', /\.dfv-bubble\{[^}]*background-color:var\(--dsw-specific-bubble/],
   ['插件 CSS：v1 小卡也在（一份 CSS 里两版共存）', /\.dfb-card\{/],
   ['默认叠压态的卡', /class="dfv-blocks" data-open="false"/],
   ['展开态的卡', /class="dfv-blocks" data-open="true"/],

@@ -48,12 +48,13 @@ const pick = (predicate) => pool.filter(predicate).at(-1) ?? null;
 const has = (turn, id) => (turn?.blocks ?? []).some((block) => block.id === id);
 
 const CASES = [
-  ['raw', (turn) => (turn.raw?.length ?? 0) > 8, [true, {}, {}, true]],
-  ['asks-risks', (turn) => has(turn, 'asks') && has(turn, 'risks'), [true, {}, {}, false]],
-  ['decide-pill', (turn) => turn.state === 'done' && (turn.decisions ?? 0) > 0, [false, {}, {}, false]],
-  ['block-collapsed', (turn) => has(turn, 'points') && (turn.blocks ?? []).length >= 3, [true, { points: true }, {}, false]],
-  ['f2-no-blocks', (turn) => (turn.blocks ?? []).length === 0, [false, {}, {}, false]],
-  ['interrupt', (turn) => turn.state === 'interrupt', [false, {}, {}, false]],
+  ['answer-full', (turn) => (turn.raw?.length ?? 0) > 8, [true, {}, {}, false, true]],
+  ['raw', (turn) => (turn.raw?.length ?? 0) > 8, [true, {}, {}, true, false]],
+  ['asks-risks', (turn) => has(turn, 'asks') && has(turn, 'risks'), [true, {}, {}, false, false]],
+  ['decide-pill', (turn) => turn.state === 'done' && (turn.decisions ?? 0) > 0, [false, {}, {}, false, false]],
+  ['block-collapsed', (turn) => has(turn, 'points') && (turn.blocks ?? []).length >= 3, [true, { points: true }, {}, false, false]],
+  ['f2-no-blocks', (turn) => (turn.blocks ?? []).length === 0, [false, {}, {}, false, false]],
+  ['interrupt', (turn) => turn.state === 'interrupt', [false, {}, {}, false, false]],
 ];
 
 /* ---------- 客户端半 ---------- */

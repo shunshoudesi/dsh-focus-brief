@@ -67,10 +67,23 @@ let selfDup = 0;
 let noBlocks = 0;
 /** 有标题的轮次（契约标题，或从提问抽的兜底标题）。 */
 let titled = 0;
+/** 每轮有几个信息块（决定叠压还是铺开：>2 才叠）。 */
+const blockHist = new Map();
 /** 闸门：卡片里不该再有「执行过程」块——用户明确说过不要执行日志（那是官方「轨迹」视图的活）。 */
 let stepsBlocks = 0;
 /** 闸门：条目必须带「字」。剥掉 markdown 标记后只剩标点的条目（`---`、孤零零的反引号）不许上卡。 */
 let junkItems = 0;
+/**
+ * 闸门：**带原始记录的轮次里必须有那一行 answer**。
+ * 客户的「回答全文」就直接读这一行（不额外往投影里塞副本），所以它一旦被 RAW_MAX 截掉，
+ * 卡片上就再也看不到全文——这正是最容易悄悄发生的一种退化。
+ */
+let missingAnswer = 0;
+/**
+ * 闸门：总卡那句结论不许是 markdown 表格/结构线压平出来的。
+ * 截图里亲眼见过：`| 检查 | 结果 | |---|---|---| … | 28 / 32 / 31 —— 完全一致 | …`。
+ */
+let junkHeadlines = 0;
 /** 闸门：产出文件里不该出现隐藏文件、`.tmp/`、`node_modules/`。 */
 let junkFiles = 0;
 /** 完成但结尾留下待办的轮次（这些轮不该被标成待确认）。 */
@@ -169,6 +182,7 @@ for (const file of files) {
     for (const block of turn.blocks ?? []) {
       if (block.id === 'steps') stepsBlocks++;
     }
+    blockHist.set(turn.blocks.length, (blockHist.get(turn.blocks.length) ?? 0) + 1);
     // 闸门：卡片上**任何地方**的工具名都不该还是原始 snake_case ——
     // 原始记录里那几行同样属于日志行，所以美化规则也得管到它（`obsidian_move` → `obsidian · move`）。
     // 只看行首：详情里出现的 `mock_target.mjs` 这类文件名不算工具名。
@@ -177,6 +191,18 @@ for (const file of files) {
       if (/^[a-z0-9]+_[a-z0-9_]+(?= ·|$)/.test(String(row.text))) rawLabels++;
     }
     if (turn.title !== '') titled++;
+    // 结论行不许是表格压平的产物（竖线扎堆）、结构线、或整张列表压平（`- a - b - c`）。
+    if (
+      turn.headline !== '' &&
+      (turn.headline.startsWith('|') ||
+        (turn.headline.match(/\|/g) ?? []).length >= 2 ||
+        /^(?:-{3,}|\*{3,}|_{3,})$/.test(turn.headline) ||
+        /^(?:[-*+]|\d+[.)])\s+\S/.test(turn.headline))
+    ) {
+      junkHeadlines++;
+    }
+    // 客户端的「回答全文」直接读这一行，不许被 RAW_MAX=40 截掉。
+    if (turn.rawOmitted !== true && turn.chars > 0 && !(turn.raw ?? []).some((row) => row.kind === 'answer')) missingAnswer++;
     for (const block of turn.blocks) {
       // 闸门：条目里必须有字。真被坑过——一轮的「需要你确认」第一条是个 `---`，
       // 另一轮是围栏那行压成的一条反引号，都被当成「要你拍板的事」摆到了卡片上。
@@ -235,6 +261,9 @@ for (const file of files) {
 console.log(`扫描会话 ${files.length} 个，折叠轮次 ${turns} 轮`);
 console.log(`状态分布: ${[...states.entries()].map(([key, count]) => `${key}=${count}`).join('  ')}`);
 console.log(`出现过的信息块: ${[...blocks.entries()].map(([key, count]) => `${key}=${count}`).join('  ')}`);
+console.log(
+  `块数分布: ${[...blockHist.entries()].sort((a, b) => a[0] - b[0]).map(([count, n]) => `${count}块=${n}轮`).join('  ')}（>2 块才叠成一摞，其余直接铺开）`,
+);
 console.log(`有标题的轮次 ${titleFromContract} / ${turns}（契约标题或从提问抽的兜底标题）｜有正文但结论行抽不出 ${headlineEmpty} 轮`);
 console.log(`关键数据块 ${kpiTurns} 轮 | 风险块 ${riskTurns} 轮 | 产出文件块 ${fileTurns} 轮 | 提问以问号结尾 ${questions} 轮`);
 console.log(`最大投影值 ${biggest.bytes} 字节（${path.basename(path.dirname(biggest.file))}）`);
@@ -242,6 +271,8 @@ console.log(`同会话 v1 投影最大值 ${biggestBrief.bytes} 字节`);
 console.log(`结论建议块里与总卡结论重复的条目 ${selfDup} 条（回归闸门：应为 0）`);
 console.log(`一个信息块都没有的轮次 ${noBlocks} 轮（这些轮只剩总卡）`);
 console.log(`带「执行过程」块的轮次 ${stepsBlocks} 轮（回归闸门：应为 0——执行日志不进卡）`);
+console.log(`结论行是表格/结构线压平的轮次 ${junkHeadlines} 轮（回归闸门：应为 0）`);
+console.log(`带原始记录却没有 answer 行的轮次 ${missingAnswer} 轮（回归闸门：应为 0——「回答全文」就靠这一行）`);
 console.log(`没有「字」的条目 ${junkItems} 条（回归闸门：应为 0——分隔线与孤零零的反引号不许上卡）`);
 console.log(`完成但结尾有待办的轮次 ${withDecisions} 轮（药丸显示「完成 · 待你定 N」，不再标成待确认）`);
 console.log(`产出文件里的隐藏/临时文件 ${junkFiles} 个（回归闸门：应为 0）`);
@@ -309,4 +340,4 @@ if (dumped !== null && samples[dumped] !== undefined) {
 
 // 闸门直接决定退出码：结论重复、卡片里混进执行日志、产出文件里混进垃圾、样板成功语、关键数据不成样、产出文件重复行。
 // 外加一条成本闸门：单轮 wire 体积不许超过预算。
-if (selfDup + stepsBlocks + junkItems + junkFiles + boilerplateNotes + kpiJunk + duplicateFiles + crossBlockDup + markupNotes + rawLabels + overBudget > 0) process.exit(1);
+if (selfDup + stepsBlocks + junkItems + missingAnswer + junkHeadlines + junkFiles + boilerplateNotes + kpiJunk + duplicateFiles + crossBlockDup + markupNotes + rawLabels + overBudget > 0) process.exit(1);
