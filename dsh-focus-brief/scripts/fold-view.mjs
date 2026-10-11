@@ -4,7 +4,7 @@
  *
  * 用法:
  *   node fold-view.mjs                 # 折 ~/.dsh/sessions 下所有会话，打印总览
- *   node fold-view.mjs --dump 12       # 额外把第 12 轮完整打出来（含原始记录）
+ *   node fold-view.mjs --dump 12       # 额外把第 12 轮完整打出来（提问、回答全文、信息块）
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -71,6 +71,8 @@ let titled = 0;
 let emptyPrompt = 0;
 /** 只有附件、没有文字的提问（图片）——这些轮靠客户端画占位。 */
 let mediaPrompts = 0;
+/** 最近多少轮该带全文（与宿主里的 FULL_TURN_LIMIT 一致；这里只用来判闸门）。 */
+const FULL_WINDOW = 8;
 /** 每轮有几个信息块（决定叠压还是铺开：>2 才叠）。 */
 const blockHist = new Map();
 /** 闸门：总卡标题不许是提问的截断——提问现在原样摆在卡片上方，再抄一遍就是同屏重复。 */
@@ -80,11 +82,12 @@ let stepsBlocks = 0;
 /** 闸门：条目必须带「字」。剥掉 markdown 标记后只剩标点的条目（`---`、孤零零的反引号）不许上卡。 */
 let junkItems = 0;
 /**
- * 闸门：**带原始记录的轮次里必须有那一行 answer**。
- * 客户的「回答全文」就直接读这一行（不额外往投影里塞副本），所以它一旦被 RAW_MAX 截掉，
- * 卡片上就再也看不到全文——这正是最容易悄悄发生的一种退化。
+ * 闸门：**最近 FULL_WINDOW 轮里，有正文的轮次必须带全文**。
+ * 客户端的「展开回答全文」就靠这个字段，它一旦悄悄没了，卡片上就没有任何提示。
  */
-let missingAnswer = 0;
+let missingFull = 0;
+/** 闸门：更早的轮次没有全文时必须明说（`fullGone`），不能让人以为按钮被吞了。 */
+let missingFullGone = 0;
 /**
  * 闸门：总卡那句结论不许是 markdown 表格/结构线压平出来的。
  * 截图里亲眼见过：`| 检查 | 结果 | |---|---|---| … | 28 / 32 / 31 —— 完全一致 | …`。
@@ -94,7 +97,7 @@ let junkHeadlines = 0;
 let junkFiles = 0;
 /** 完成但结尾留下待办的轮次（这些轮不该被标成待确认）。 */
 let withDecisions = 0;
-/** 闸门：原始记录里不该出现“成功了”这类零信息量的样板说明。 */
+/** 闸门：工具说明里不该出现“成功了”这类零信息量的样板话（过滤发生在折叠时，结果存在 state 里）。 */
 let boilerplateNotes = 0;
 /** 单轮 wire 体积预算（KB）：目的是钉住"卡片原料"的成本——放宽上限时不许悄悄翻倍。 */
 const TURN_BUDGET = 24000;
@@ -104,7 +107,7 @@ let biggestTurn = 0;
 let duplicateFiles = 0;
 /** 闸门：结论建议不许重复「需要你确认」/「风险提醒」里已经列出的条目（同屏重复）。 */
 let crossBlockDup = 0;
-/** 闸门：原始记录的说明里不该夹着工具标记语言；工具名不该还是原始 snake_case。 */
+/** 闸门：工具说明里不该夹着工具标记语言；工具名不该还是原始 snake_case。 */
 let markupNotes = 0;
 let rawLabels = 0;
 /**
@@ -158,12 +161,7 @@ for (const file of files) {
     if (turnBytes > biggestTurn) biggestTurn = turnBytes;
     if (turnBytes > TURN_BUDGET) overBudget++;
   }
-  for (const turn of value) {
-    const bytes = JSON.stringify(turn).length;
-    if (bytes > biggestTurn) biggestTurn = bytes;
-    if (bytes > TURN_BUDGET) overBudget++;
-  }
-  for (const turn of value) {
+  for (const [index, turn] of value.entries()) {
     turns++;
     if (turn.blocks.length === 0) noBlocks++;
     // 闸门：结论建议不许把「需要你确认」「风险提醒」的内容再抄一遍（同屏重复）。
@@ -180,22 +178,23 @@ for (const file of files) {
       }
     }
     if (turn.state === 'done' && (turn.decisions ?? 0) > 0) withDecisions++;
-    for (const row of turn.raw ?? []) {
-      if (row.note !== undefined && /successfully|has been (updated|created|written|saved)|已(成功)?(写入|更新|保存|创建)/i.test(row.note)) boilerplateNotes++;
+    // 说明文字与工具名的过滤**发生在折叠时**（结果存在 state 里）。原始记录模块删掉之后 wire 里
+    // 没有这些行了，所以这几条闸门改成直接查 state —— 它们守的是「折进去的东西干不干净」。
+    for (const tool of state.turns[index]?.tools ?? []) {
+      if (/successfully|has been (updated|created|written|saved)|已(成功)?(写入|更新|保存|创建)/i.test(String(tool.note))) boilerplateNotes++;
       // 闸门：说明里不该夹着工具自己的标记语言（`<path>…</path>` 之类）。
-      if (row.note !== undefined && /<\/?[a-z][a-z0-9-]*>/i.test(row.note)) markupNotes++;
+      if (/<\/?[a-z][a-z0-9-]*>/i.test(String(tool.note))) markupNotes++;
+      // 闸门：工具名不该还是原始 snake_case（`obsidian_move` → `obsidian · move`）。
+      if (/^[a-z0-9]+_[a-z0-9_]+$/.test(String(tool.label))) rawLabels++;
     }
     for (const block of turn.blocks ?? []) {
       if (block.id === 'steps') stepsBlocks++;
     }
+    // 闸门：最近 FULL_TURN_LIMIT 轮里，有正文的轮次必须带全文（否则「展开回答全文」会莫名消失）。
+    if (index >= value.length - FULL_WINDOW && turn.chars > 0 && turn.full === '') missingFull++;
+    // 闸门：更早的轮次如果没有全文，必须明说（`fullGone`），不能让人以为按钮被吞了。
+    if (index < value.length - FULL_WINDOW && turn.chars > 0 && turn.fullGone !== true) missingFullGone++;
     blockHist.set(turn.blocks.length, (blockHist.get(turn.blocks.length) ?? 0) + 1);
-    // 闸门：卡片上**任何地方**的工具名都不该还是原始 snake_case ——
-    // 原始记录里那几行同样属于日志行，所以美化规则也得管到它（`obsidian_move` → `obsidian · move`）。
-    // 只看行首：详情里出现的 `mock_target.mjs` 这类文件名不算工具名。
-    for (const row of turn.raw ?? []) {
-      if (row.kind !== 'tool') continue;
-      if (/^[a-z0-9]+_[a-z0-9_]+(?= ·|$)/.test(String(row.text))) rawLabels++;
-    }
     if (turn.title !== '') titled++;
     // 标题不许是提问的截断（提问已经单独摆在卡片上方）。
     if (turn.title !== '' && turn.prompt !== '') {
@@ -212,8 +211,6 @@ for (const file of files) {
     ) {
       junkHeadlines++;
     }
-    // 客户端的「回答全文」直接读这一行，不许被 RAW_MAX=40 截掉。
-    if (turn.rawOmitted !== true && turn.chars > 0 && !(turn.raw ?? []).some((row) => row.kind === 'answer')) missingAnswer++;
     for (const block of turn.blocks) {
       // 闸门：条目里必须有字。真被坑过——一轮的「需要你确认」第一条是个 `---`，
       // 另一轮是围栏那行压成的一条反引号，都被当成「要你拍板的事」摆到了卡片上。
@@ -287,14 +284,15 @@ console.log(`结论建议块里与总卡结论重复的条目 ${selfDup} 条（�
 console.log(`一个信息块都没有的轮次 ${noBlocks} 轮（这些轮只剩总卡）`);
 console.log(`带「执行过程」块的轮次 ${stepsBlocks} 轮（回归闸门：应为 0——执行日志不进卡）`);
 console.log(`结论行是表格/结构线压平的轮次 ${junkHeadlines} 轮（回归闸门：应为 0）`);
-console.log(`带原始记录却没有 answer 行的轮次 ${missingAnswer} 轮（回归闸门：应为 0——「回答全文」就靠这一行）`);
+console.log(`最近 ${FULL_WINDOW} 轮里有正文却没有全文的 ${missingFull} 轮（回归闸门：应为 0——「展开回答全文」就靠它）`);
+console.log(`更早的轮次没有全文却没明说的 ${missingFullGone} 轮（回归闸门：应为 0）`);
 console.log(`没有「字」的条目 ${junkItems} 条（回归闸门：应为 0——分隔线与孤零零的反引号不许上卡）`);
 console.log(`完成但结尾有待办的轮次 ${withDecisions} 轮（药丸显示「完成 · 待你定 N」，不再标成待确认）`);
 console.log(`产出文件里的隐藏/临时文件 ${junkFiles} 个（回归闸门：应为 0）`);
 console.log(`产出文件里的重复行 ${duplicateFiles} 行（回归闸门：应为 0）`);
 console.log(`结论建议重复别块条目 ${crossBlockDup} 条（回归闸门：应为 0）`);
 console.log(`说明里夹着工具标记语言的 ${markupNotes} 条｜还是原始 snake_case 的工具名 ${rawLabels} 个（回归闸门：均应为 0）`);
-console.log(`原始记录里的样板成功语 ${boilerplateNotes} 条（回归闸门：应为 0）`);
+console.log(`工具说明里的样板成功语 ${boilerplateNotes} 条（回归闸门：应为 0）`);
 console.log(`关键数据里不成样的项 ${kpiJunk} 项（回归闸门：应为 0）`);
 console.log(`单轮 wire 最大 ${Math.round(biggestTurn / 1024)} KB｜超过预算 ${TURN_BUDGET / 1024} KB 的轮次 ${overBudget} 轮（回归闸门：应为 0）`);
 {
@@ -336,7 +334,7 @@ if (dumped !== null && samples[dumped] !== undefined) {
   console.log(`\n============ 第 ${dumped} 条样本的完整卡片 ============`);
   console.log(
     JSON.stringify(
-      { ...turn, raw: `${turn.raw.length} 条`, blocks: turn.blocks.map((block) => `${block.id}(${block.items.length})`) },
+      { ...turn, full: `${turn.full.length} 字${turn.fullGone === true ? '（这轮没有全文）' : ''}`, blocks: turn.blocks.map((block) => `${block.id}(${block.items.length})`) },
       null,
       2,
     ),
@@ -346,13 +344,12 @@ if (dumped !== null && samples[dumped] !== undefined) {
     console.log(`\n[${block.id}]`);
     for (const item of block.items) console.log(`   ${JSON.stringify(item)}`);
   }
-  console.log('\n---- 原始记录 ----');
-  for (const row of turn.raw) {
-    console.log(`   ${row.kind.padEnd(5)} ${row.meta}  ${row.text.slice(0, 110)}`);
-    if (row.note !== undefined && row.note !== '') console.log(`         note: ${row.note.slice(0, 110)}`);
-  }
+  console.log('\n---- 提问（原样，卡片上方那条） ----');
+  console.log(`   ${turn.prompt === '' ? '（这一轮没有用户消息）' : turn.prompt.slice(0, 300)}`);
+  console.log('\n---- 回答全文（点「展开回答全文」看到的那份） ----');
+  console.log(`   ${turn.full === '' ? '（这轮较早，只保留提炼结果）' : `${turn.full.slice(0, 300)}…`}`);
 }
 
 // 闸门直接决定退出码：结论重复、卡片里混进执行日志、产出文件里混进垃圾、样板成功语、关键数据不成样、产出文件重复行。
 // 外加一条成本闸门：单轮 wire 体积不许超过预算。
-if (selfDup + stepsBlocks + junkItems + missingAnswer + junkHeadlines + titleDup + junkFiles + boilerplateNotes + kpiJunk + duplicateFiles + crossBlockDup + markupNotes + rawLabels + overBudget > 0) process.exit(1);
+if (selfDup + stepsBlocks + junkItems + missingFull + missingFullGone + junkHeadlines + titleDup + junkFiles + boilerplateNotes + kpiJunk + duplicateFiles + crossBlockDup + markupNotes + rawLabels + overBudget > 0) process.exit(1);

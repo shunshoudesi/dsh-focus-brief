@@ -160,9 +160,7 @@ const must = [
   ['提问原样显示（保住你自己敲的换行与空格）', /\.dfv-ask-text\{[^}]*white-space:pre-wrap/],
   ['回答正文渲染成元素（围栏代码块保留换行）', /\.dfv-pre\{[^}]*white-space:pre-wrap/],
   ['回答正文里的表格有边框', /\.dfv-table th,\.dfv-table td\{[^}]*border:1px solid var\(--dsw-alias-border-l1\)/],
-  // 踩过的坑：说明文字是 <span>，`margin-top` 对行内元素无效，结果和工具名粘在一行
-  // （`改文件 · index.js · 完成The file … has been updated successfully.`）。必须独占一行。
-  ['v2 原始记录的说明独占一行', /\.dfv-raw-note\{display:block/],
+  ['「这轮较早/正文过长」这类说明的样式还在', /\.dfv-full-hint\{[^}]*color:var\(--dsw-alias-label-secondary\)/],
   // 两版共同要求
   ['主题能力探测', /@supports \(color:color-mix\(/],
   ['高对比模式退回', /@media \(forced-colors:active\)/],
@@ -172,15 +170,17 @@ for (const [label, pattern] of must) {
   if (!pattern.test(css)) problems.push(`缺少要素：${label}`);
 }
 
-// ---------- 5b. 执行日志不许回到卡片里 ----------
-// 用户的原话是「不要他的执行日志」：一张卡只放**回答本身**拆出来的东西
-// （要你定的事 / 关键数据 / 产出文件 / 结论建议 / 风险提醒），工具调用时间线不进卡。
-// 宿主那一半已经不再产出 steps 块，样式这半再钉一次：那些选择器一旦回来就算失败。
+// ---------- 5b. 执行日志与原始记录都不许回到卡片里 ----------
+// 用户的原话是「不要他的执行日志」+「去掉原始记录模块」：一张卡只放**回答本身**拆出来的东西
+// （要你定的事 / 关键数据 / 产出文件 / 结论建议 / 风险提醒）+ 上方你的提问 + 卡里的回答区。
+// 宿主那一半已经不再产出 steps / raw，样式这半再钉一次：那些选择器一旦回来就算失败。
 for (const [label, pattern] of [
   ['执行日志的步骤时间线选择器（.dfv-steps / .dfv-step*）', /\.dfv-step/],
   ['执行日志的步骤图标底色（data-id="steps"）', /data-id="steps"/],
   ['执行日志的步骤文案键（block.steps / count.steps）', /block\.steps|count\.steps/],
   ['执行日志的「执行过程」块名', /执行过程/],
+  ['原始记录模块的选择器（.dfv-raw*）', /\.dfv-raw/],
+  ['原始记录的文案键（card.raw / a11y.raw / raw.*）', /card\.raw|a11y\.raw|\braw\.(?:you|said|tool|error|answer)/],
   // 蓝底只给「你的提问」：官方那边蓝底就是用户消息。回答留在卡片里、白底（用户明确要求分开）。
   ['回答上的气泡底色（.dfv-answer 不该有 background）', /\.dfv-answer\{[^}]*background/],
 ]) {

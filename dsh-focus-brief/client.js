@@ -5,8 +5,10 @@
  *
  * 1. `conversation.chat.turnTail`（v1 便宜版）：普通对话视图里那张折叠小卡，保留当兜底。
  * 2. `conversation.view` 的 `focus`（v2 专注视图）：注册一个平行视图，切过去之后
- *    官方那套一行行的画法完全不渲染，整页由「每轮一张结果卡」组成——
- *    总卡（状态点 + 标题 + 一句结论）+ 一摞信息块（点开纵向手风琴）+ 一行可点开的原始记录。
+ *    官方那套一行行的画法完全不渲染，整页由「每一轮」组成——
+ *    上方一条**你自己输入的原话**（官方那条蓝底黑字气泡，原样），下面一张结果卡
+ *    （状态点 + 标题 + 白底回答区，点开换全文 + 一摞信息块，点开纵向手风琴）。
+ *    卡片上**没有执行日志、也没有原始记录模块**：日志在官方「轨迹」视图里。
  *
  * 结构照 `竖版堆叠.html` 的设计：卡片是实底白面 + 发丝边 + 轻投影（不是毛玻璃），
  * 配色全部落在主题 token 上（含深色主题），所以深浅两套都成立。
@@ -86,23 +88,12 @@ window.__ModuleLoader__.load({
       'card.expandBlocks': '展开 {count} 个信息块',
       'card.collapseBlocks': '收起',
       'card.more': '还有 {count} 个 ›',
-      'card.raw': '原始记录 {count} 条',
-      'card.rawOmitted': '这轮较早，只保留提炼结果',
-      'card.rawEmpty': '这一轮没有记录',
+      'card.fullGone': '这轮较早，只保留提炼结果',
       'card.truncated': '正文过长已截断，切回对话视图看全文。',
       'card.followUp': '继续追问',
       'card.followUpSeed': '接着第 {turn} 轮（{title}）继续：',
-      'raw.you': '你问的',
-      'raw.said': '助手',
-      'raw.tool': '工具',
-      'raw.error': '失败',
-      'raw.answer': '回答',
-      'step.run': '进行中',
-      'step.done': '完成',
-      'step.fail': '失败',
       'a11y.block': '{label}，{count}',
       'a11y.full': '回答全文，共 {count} 字',
-      'a11y.raw': '原始记录，{count} 条',
       'time.minutes': '{hour}:{minute}',
     };
 
@@ -150,23 +141,12 @@ window.__ModuleLoader__.load({
       'card.expandBlocks': 'Expand {count} blocks',
       'card.collapseBlocks': 'Collapse',
       'card.more': '{count} more ›',
-      'card.raw': 'Raw log · {count} rows',
-      'card.rawOmitted': 'Older turn: digest only',
-      'card.rawEmpty': 'No rows in this turn',
+      'card.fullGone': 'Older turn: digest only',
       'card.truncated': 'Answer truncated — switch to the Chat view for the full text.',
       'card.followUp': 'Follow up',
       'card.followUpSeed': 'Continuing turn {turn} ({title}):',
-      'raw.you': 'You',
-      'raw.said': 'Assistant',
-      'raw.tool': 'Tool',
-      'raw.error': 'Failure',
-      'raw.answer': 'Answer',
-      'step.run': 'running',
-      'step.done': 'done',
-      'step.fail': 'failed',
       'a11y.block': '{label}, {count}',
       'a11y.full': 'Full answer, {count} characters',
-      'a11y.raw': 'Raw log, {count} rows',
       'time.minutes': '{hour}:{minute}',
     };
 
@@ -249,6 +229,8 @@ window.__ModuleLoader__.load({
       '.dfv-table th,.dfv-table td{padding:4px 8px;border:1px solid var(--dsw-alias-border-l1);text-align:left;vertical-align:top}',
       '.dfv-table th{background-color:rgba(0,0,0,.03);background-color:color-mix(in srgb,var(--dsw-alias-label-primary) 5%,transparent);font-weight:600}',
       '.dfv-full-toggle{margin-top:8px;border:0;padding:0;background-color:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:11.5px;line-height:18px;cursor:pointer}',
+      /* 「这轮较早，只保留提炼结果」/「正文过长已截断」这类说明（原先挂在原始记录面板里）。 */
+      '.dfv-full-hint{margin-top:8px;font-size:11.5px;line-height:18px;color:var(--dsw-alias-label-secondary)}',
       '.dfv-full-toggle:hover{color:var(--dsw-alias-label-primary)}',
       '.dfv-full-toggle:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}',
 
@@ -320,17 +302,6 @@ window.__ModuleLoader__.load({
       '.dfv-btn:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}',
       '.dfv-btn-primary{border-color:var(--dsw-alias-brand-primary);background-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-bg-base)}',
       '.dfv-btn-primary:hover{color:var(--dsw-alias-bg-base)}',
-
-      /* ---------- 原始记录 ---------- */
-      '.dfv-raw{margin:0 14px 14px;border:1px solid var(--dsw-alias-border-l1);border-radius:12px;overflow:hidden}',
-      '.dfv-raw-body{max-height:440px;overflow-y:auto;overscroll-behavior:auto;padding:9px 12px;border-top:1px solid var(--dsw-alias-border-l1)}',
-      '.dfv-raw-item{display:flex;gap:8px;padding:5px 0;font-size:12.5px;line-height:19px}',
-      '.dfv-raw-item + .dfv-raw-item{border-top:1px solid var(--dsw-alias-border-l1)}',
-      '.dfv-raw-kind{flex:none;width:46px;font-size:11px;color:var(--dsw-alias-label-secondary)}',
-      '.dfv-raw-text{flex:1 1 auto;min-width:0;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--dsw-alias-label-primary)}',
-      '.dfv-raw-text[data-kind="tool"]{font-size:12px}',
-      '.dfv-raw-note{display:block;margin-top:3px;font-size:11.5px;color:var(--dsw-alias-label-secondary);white-space:pre-wrap;overflow-wrap:anywhere}',
-      '.dfv-raw-hint{padding:8px 12px;font-size:11.5px;color:var(--dsw-alias-label-secondary)}',
 
       /* ---------- color-mix 增强：卡内分区与状态药丸的底色 ---------- */
       '@supports (color:color-mix(in srgb,red 50%,transparent)){',
@@ -867,56 +838,6 @@ function scrollDecision(state) {
       );
     }
 
-    /** 原始记录：这一轮的提问、助手各条文字、每次工具调用、失败原因、最终回答全文。 */
-    function RawLog(props) {
-      const { turn, t, open, onToggle } = props;
-      const rows = Array.isArray(turn.raw) ? turn.raw : [];
-      const kindLabel = { you: 'raw.you', said: 'raw.said', tool: 'raw.tool', fail: 'raw.error', answer: 'raw.answer' };
-      const statusLabel = { run: 'step.run', done: 'step.done', fail: 'step.fail' };
-
-      const row = (item, index) =>
-        h(
-          'div',
-          { className: 'dfv-raw-item', key: `${index}:${item.kind}` },
-          h('span', { className: 'dfv-raw-kind' }, t(kindLabel[item.kind] ?? 'raw.said')),
-          h(
-            'span',
-            { className: 'dfv-raw-text', 'data-kind': item.kind },
-            item.kind === 'tool' ? `${item.text}${item.meta === '' ? '' : ` · ${t(statusLabel[item.meta] ?? 'step.done')}`}` : item.text,
-            item.note === undefined || item.note === '' ? null : h('span', { className: 'dfv-raw-note' }, item.note),
-          ),
-        );
-
-      return h(
-        'div',
-        { className: 'dfv-raw' },
-        h(
-          'button',
-          {
-            type: 'button',
-            className: 'dfv-row',
-            'aria-expanded': open,
-            'aria-label': t('a11y.raw', { count: turn.rawTotal }),
-            onClick: onToggle,
-          },
-          h('span', { className: 'dfv-ico', 'data-id': 'files', 'aria-hidden': 'true' }, '⧉'),
-          h('span', { className: 'dfv-block-title' }, t('card.raw', { count: turn.rawTotal })),
-          h('span', { className: 'dfv-arrow', 'aria-hidden': 'true' }, '›'),
-        ),
-        open
-          ? h(
-              'div',
-              { className: 'dfv-raw-body' },
-              rows.length === 0
-                ? h('div', { className: 'dfv-raw-hint' }, turn.rawOmitted === true ? t('card.rawOmitted') : t('card.rawEmpty'))
-                : rows.map(row),
-              turn.rawOmitted === true && rows.length > 0 ? h('div', { className: 'dfv-raw-hint' }, t('card.rawOmitted')) : null,
-              turn.truncated === true ? h('div', { className: 'dfv-raw-hint' }, t('card.truncated')) : null,
-            )
-          : null,
-      );
-    }
-
     /** 一轮 = 一张结果卡。 */
     function TurnCard(props) {
       const { turn } = props;
@@ -924,9 +845,8 @@ function scrollDecision(state) {
       const [deckOpen, setDeckOpen] = React.useState(false);
       const [closed, setClosed] = React.useState({});
       const [showAll, setShowAll] = React.useState({});
-      const [rawOpen, setRawOpen] = React.useState(false);
       // 回答全文是否展开。**这个 hook 必须排在最后**：SSR 回归用「按下标返回固定值」的垫片驱动交互状态，
-      // 加在末尾，原来那 4 个下标才对得上。
+      // 加在末尾，前三个下标才对得上。
       const [fullOpen, setFullOpen] = React.useState(false);
 
       const blocks = (Array.isArray(turn.blocks) ? turn.blocks : []).filter((block) => BLOCK_ALLOW.has(block.id));
@@ -960,10 +880,8 @@ function scrollDecision(state) {
       );
 
       // 「回答」就在卡里：默认是那句话结论，点开换成全文（白底，不用气泡——蓝底留给你的提问）。
-      // 全文直接取原始记录里那一行（kind === 'answer'），**不额外往投影里塞一份副本**——
-      // 那一行本来就是这一轮的最终回答原文（最近 8 轮带，更早的轮次只留提炼结果）。
-      const answerRow = (Array.isArray(turn.raw) ? turn.raw : []).find((row) => row.kind === 'answer');
-      const full = answerRow !== undefined && typeof answerRow.text === 'string' ? answerRow.text : '';
+      // 全文由宿主直接送（`turn.full`），**只给最近 8 轮**；更早的轮次只留提炼结果，这里明说一句。
+      const full = typeof turn.full === 'string' ? turn.full : '';
       const showFull = fullOpen && full !== '';
       // 展开时只画全文：全文本来就从那句结论开始，两行都画就是同屏重复。
       const answer = h(
@@ -973,7 +891,9 @@ function scrollDecision(state) {
           ? h('div', { className: 'dfv-full' }, markdownNodes(full))
           : h('div', { className: 'dfv-value', 'data-empty': headline === '' ? 'true' : 'false' }, headline === '' ? t('card.empty') : headline),
         full === ''
-          ? null
+          ? turn.fullGone === true
+            ? h('div', { className: 'dfv-full-hint' }, t('card.fullGone'))
+            : null
           : h(
               'button',
               {
@@ -985,6 +905,8 @@ function scrollDecision(state) {
               },
               showFull ? t('card.fullClose') : t('card.fullOpen', { count: full.length }),
             ),
+        // 正文被截断（超过 8000 字上限）时说明一句——原先这句话挂在原始记录面板里。
+        showFull && turn.truncated === true ? h('div', { className: 'dfv-full-hint' }, t('card.truncated')) : null,
       );
 
       const rows = blocks.map((block) => {
@@ -1061,7 +983,6 @@ function scrollDecision(state) {
         head,
         answer,
         blocksNode,
-        turn.rawTotal === 0 && turn.rawOmitted !== true ? null : h(RawLog, { turn, t, open: rawOpen, onToggle: () => setRawOpen((value) => !value) }),
         foot,
       );
     }
@@ -1080,7 +1001,7 @@ function scrollDecision(state) {
       const didInitialScroll = React.useRef(false);
 
       const last = turns.length === 0 ? null : turns[turns.length - 1];
-      const signature = last === null ? '0' : `${last.turn}:${last.state}:${last.rawTotal}:${last.blocks?.length ?? 0}:${last.chars}`;
+      const signature = last === null ? '0' : `${last.turn}:${last.state}:${last.fullGone === true}:${last.blocks?.length ?? 0}:${last.chars}`;
 
       React.useEffect(() => {
         const node = rootRef.current;

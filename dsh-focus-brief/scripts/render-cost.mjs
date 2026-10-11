@@ -1,7 +1,7 @@
 /**
  * 一次性测量：整屏渲染的开销。
  * 这个视图取代了整块会话正文，所以“一轮两张卡”的默认态必须够轻——
- * 信息块内容与原始记录都是按需渲染的，这一步就是用数字证明这个设计真的省。
+ * 信息块内容与回答全文都是按需渲染的，这一步就是用数字证明这个设计真的省。
  *
  * 用法: node render-cost.mjs
  */
@@ -117,8 +117,8 @@ for (const file of files.slice(0, 3)) {
   console.log(`\n会话 ${path.basename(path.dirname(file.full))}：${turns.length} 轮 / ${tools} 次工具调用`);
   // 默认态：信息块收起（只有状态是 done 且块数 > 2 的才真的是收起态）。makeValue(卡序, 状态位) → 值。
   await render(turns, (card, slot) => (slot === 0 ? false : slot === 1 ? {} : slot === 2 ? {} : false), '默认（叠压）');
-  // 全部展开：每张卡都铺开，但原始记录仍关着（slot 3 必须显式 false——传 {} 是 truthy，会误开）。
+  // 全部展开：每张卡都铺开，但回答全文仍关着（slot 3 必须显式 false——传 {} 是 truthy，会误开）。
   await render(turns, (card, slot) => (slot === 0 ? true : slot === 3 ? false : {}), '全部展开');
-  // 连原始记录也打开：最坏情况。
-  await render(turns, (card, slot) => (slot === 0 || slot === 3 ? true : {}), '展开 + 原始记录');
+  // 连回答全文也展开：最坏情况（最近 8 轮会把整篇回答渲染成元素）。
+  await render(turns, (card, slot) => (slot === 0 || slot === 3 ? true : {}), '展开 + 回答全文');
 }

@@ -2,12 +2,12 @@
  * 一次性端到端验证：真 React（开发版，会报告警）+ 真实会话折叠数据 → 真渲染成 HTML。
  *
  * 覆盖两层：
- * 1. 真实语料：14 个会话、176 轮，每轮 5 种交互状态（叠压 / 展开 / 单块折叠 / 展开全部 / 打开原始记录）。
- * 2. 合成边界：没有信息块、只有 1~2 块、5 块、四种状态、原始记录被省略、正文被截断、超长与怪异字符，
+ * 1. 真实语料：14 个会话、200+ 轮，每轮 4 种交互状态（叠压 / 展开 / 单块折叠 / 展开全部 / 展开回答全文）。
+ * 2. 合成边界：没有信息块、只有 1~2 块、5 块、四种状态、更早的轮次没有全文、正文被截断、超长与怪异字符，
  *    以及「旧宿主还在推执行过程块」这一种过渡态。
  *
  * 断言：不抛错、无 React 告警、字典键不缺、状态与计数渲染正确、隐藏态真的没有正文、
- * 执行日志整块不出现（那是用户明确不要的东西）。
+ * 执行日志与原始记录模块都不出现（那是用户明确不要的东西）。
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -198,11 +198,11 @@ const base = {
   headline: '这是一句合成的结论，用来验证边界。',
   prompt: '合成的提问',
   blocks: [],
-  raw: [{ kind: 'you', text: '合成的提问', meta: '' }, { kind: 'answer', text: '合成的正文', meta: '' }],
-  rawTotal: 2,
-  rawOmitted: false,
+  // 宿主现在直接送「回答全文」这一份，不再有原始记录那种行数组。
+  full: '合成的正文',
+  fullGone: false,
   truncated: false,
-  counts: { files: 0, tools: 0, kpi: 0, points: 0, risks: 0, asks: 0, raw: 2 },
+  counts: { files: 0, tools: 0, kpi: 0, points: 0, risks: 0, asks: 0 },
   steps: 1,
   chars: 6,
 };
@@ -217,15 +217,16 @@ const manyBlocks = [
   { id: 'points', items: Array.from({ length: 7 }, (_, index) => ({ depth: index % 3, text: `建议 ${index}` })) },
   { id: 'risks', items: [{ text: '这是一个风险提醒' }] },
 ];
-synthetic.push({ ...base, turn: 904, blocks: manyBlocks, state: 'wait', counts: { files: 8, tools: 12, kpi: 2, points: 7, risks: 1, asks: 1, raw: 2 } });
-synthetic.push({ ...base, turn: 905, blocks: manyBlocks, state: 'run', rawTotal: 0, raw: [], counts: { ...base.counts, raw: 0 } });
-synthetic.push({ ...base, turn: 906, blocks: manyBlocks, state: 'fail', stateReason: 'error', rawOmitted: true });
+synthetic.push({ ...base, turn: 904, blocks: manyBlocks, state: 'wait', counts: { files: 8, tools: 12, kpi: 2, points: 7, risks: 1, asks: 1 } });
+// 更早的轮次没有全文（只保留提炼结果）：`fullGone` 让卡片明说一句。
+synthetic.push({ ...base, turn: 905, blocks: manyBlocks, state: 'run', full: '', fullGone: true, counts: { ...base.counts } });
+synthetic.push({ ...base, turn: 906, blocks: manyBlocks, state: 'fail', stateReason: 'error', full: '', fullGone: true });
 synthetic.push({ ...base, turn: 907, blocks: manyBlocks, state: 'interrupt', stateReason: 'max-tokens', truncated: true });
 // 状态名和理由同义时不该画两遍（真实卡上出现过「中断 · 已中断」）。
 synthetic.push({ ...base, turn: 912, title: '同义理由', blocks: oneBlock, state: 'interrupt', stateReason: 'interrupted' });
 // 但「中断 · 已中止」是不同信息，要留。
 synthetic.push({ ...base, turn: 913, title: '不同理由', blocks: oneBlock, state: 'interrupt', stateReason: 'aborted' });
-synthetic.push({ ...base, turn: 908, title: '', headline: '', blocks: [], raw: [], rawTotal: 0, chars: 0, decisions: 0 });
+synthetic.push({ ...base, turn: 908, title: '', headline: '', blocks: [], full: '', fullGone: false, chars: 0, decisions: 0 });
 // 完成 + 结尾有待办：点仍是完成色，药丸转琥珀并写明几件事要你定。
 synthetic.push({
   ...base,
@@ -270,20 +271,19 @@ synthetic.push({
   title: '奇怪字符',
   headline: '<script>alert(1)</script> & "引号" 😀 \u0000 制表\u0009符',
   blocks: [{ id: 'points', items: [{ depth: 0, text: '<b>粗体注入</b> & 中文' }] }],
-  raw: [{ kind: 'answer', text: '</div><script>bad</script>', meta: '' }],
+  full: '</div><script>bad</script>',
 });
 
 const allTurns = [...realTurns, ...synthetic];
 console.log(`待渲染轮次：真实 ${realTurns.length} + 合成 ${synthetic.length}`);
 
 const queues = [
-  ['叠压（默认）', [false, {}, {}, false, false]],
-  ['展开整摞', [true, {}, {}, false, false]],
-  ['单块折叠', [true, { points: true }, {}, false, false]],
-  ['展开全部项', [true, {}, { points: true, files: true }, false, false]],
-  ['打开原始记录', [true, {}, {}, true, false]],
-  // 第 5 个 useState 是「展开回答全文」。**它必须排在最后**，前四个下标才对得上。
-  ['展开回答全文', [true, {}, {}, false, true]],
+  ['叠压（默认）', [false, {}, {}, false]],
+  ['展开整摞', [true, {}, {}, false]],
+  ['单块折叠', [true, { points: true }, {}, false]],
+  ['展开全部项', [true, {}, { points: true, files: true }, false]],
+  // 第 4 个 useState 是「展开回答全文」——原始记录模块删掉之后，它是最后一个开关。
+  ['展开回答全文', [true, {}, {}, true]],
 ];
 
 let renders = 0;
@@ -314,16 +314,15 @@ for (const turn of allTurns) {
     const blocks = (Array.isArray(turn.blocks) ? turn.blocks : []).filter((block) => BLOCK_ALLOW.has(block.id));
     const fanned = turn.state !== 'done' || blocks.length <= 2;
     const open = queue[0] === true || fanned;
-    // 五个开关的下标：deckOpen=0 / closed=1 / showAll=2 / rawOpen=3 / fullOpen=4。
-    const rawOpen = queue[3] === true;
-    const fullOpen = queue[4] === true;
+    // 四个开关的下标：deckOpen=0 / closed=1 / showAll=2 / fullOpen=3（原始记录删掉后它是最后一个）。
+    const fullOpen = queue[3] === true;
     check(`${tag} 折叠态不应渲染正文`, !(open === false && html.includes('dfv-body')));
     if (blocks.length > 0) check(`${tag} 展开态应有标题行`, html.includes('dfv-row'));
     if (blocks.length > 0) {
       check(`${tag} 每块都有图标', `, (html.match(/dfv-ico/g) ?? []).length >= blocks.length);
     }
     if (turn.title !== '') check(`${tag} 应渲染标题`, html.includes(escapeHtml(turn.title.slice(0, 8))));
-    if (turn.title === '' && turn.headline !== '' && blocks.length <= 2 && rawOpen === false && fullOpen === false) {
+    if (turn.title === '' && turn.headline !== '' && blocks.length <= 2 && fullOpen === false) {
       // 标题位只在该轮没有标题时才用「第 N 轮」兜底，绝不拿结论行去填——那会让同一句话出现两次。
       check(`${tag} 无标题时标题位用「第 N 轮」`, html.includes(escapeHtml(zh['card.turnFallback'].replace('{turn}', String(turn.turn)))));
       const needle = escapeHtml(turn.headline.slice(0, 10));
@@ -346,9 +345,9 @@ for (const turn of allTurns) {
     if (blocks.length > 2 && turn.state === 'done' && queue[0] === true) {
       check(`${tag} 展开态应有收起胶囊`, html.includes(zh['card.collapseBlocks']));
     }
-    if (turn.rawTotal > 0) {
-      check(`${tag} 应有原始记录行`, html.includes(zh['card.raw'].replace('{count}', String(turn.rawTotal))));
-    }
+    // 原始记录模块被整个去掉了：任何一轮都不该再出现它的骨架。
+    // 只查结构（`class="dfv-raw`）——真实回答的正文里会提到「原始记录」这四个字（我自己的轮次就是）。
+    check(`${tag} 不该再有原始记录模块`, !html.includes('class="dfv-raw'));
     if (turn.state !== 'done') {
       check(`${tag} 状态药丸应显示对应状态`, html.includes(zh[`state.${turn.state}`]));
     }
@@ -371,11 +370,10 @@ for (const turn of allTurns) {
     // 插件自己的类名（第 32 轮就是），用裸字符串查会把它误判成"渲染了执行日志"。
     check(`${tag} 不该渲染执行日志的时间线`, !html.includes('class="dfv-step'));
     check(`${tag} 不该渲染执行日志的图标`, !html.includes('data-id="steps"'));
-    // 回答气泡：这一轮的回答就在卡里。原始记录里那一行 answer 就是这一轮的最终回答原文。
-    // （踩过的坑：这里原先写的是 queue[4]，而「打开原始记录」的开关是第 4 个 useState＝下标 3，
-    //   于是那几条断言**一次都没跑过**。现在 5 个开关各有各的下标，rawOpen=3、fullOpen=4。）
-    const answerRow = (Array.isArray(turn.raw) ? turn.raw : []).find((row) => row.kind === 'answer');
-    const fullText = answerRow === undefined ? '' : answerRow.text;
+    // 回答：这一轮的回答就在卡里（宿主直接送 `full`，原始记录模块已经删掉）。
+    // （踩过的坑：这里原先写的是 queue[4]，而当时「打开原始记录」的开关是下标 3，
+    //   于是那几条断言**一次都没跑过**。现在四个开关下标摆明：fullOpen=3。）
+    const fullText = typeof turn.full === 'string' ? turn.full : '';
     check(`${tag} 回答应放在卡片里（.dfv-answer）`, html.includes('dfv-answer'));
     // 用户输入单独摆出来、**原样**：不改写、不剥标记、换行保留（CSS 用 pre-wrap）。
     const media = typeof turn.promptMedia === 'number' ? turn.promptMedia : 0;
@@ -467,23 +465,20 @@ for (const turn of allTurns) {
       }
     } else {
       check(`${tag} 没有全文时不该给「展开回答全文」`, !html.includes('dfv-full-toggle'));
+      // 更早的轮次：明说一句「这轮较早，只保留提炼结果」，而不是留一个点不动的死按钮。
+      if (turn.fullGone === true && turn.chars > 0) {
+        check(`${tag} 更早的轮次应说明只保留提炼结果`, html.includes(zh['card.fullGone']));
+      } else {
+        check(`${tag} 没有全文时不该有那句说明`, !html.includes(zh['card.fullGone']));
+      }
     }
-    if (rawOpen && turn.rawTotal > 0) {
-      const rows = Array.isArray(turn.raw) ? turn.raw : [];
-      check(`${tag} 打开原始记录应渲染容器`, html.includes('dfv-raw-body'));
-      // 行和提示是二选一：带原文的轮次渲染行；更早的轮次只剩提炼结果，渲染的是那句提示，不是空壳。
-      if (rows.length > 0) check(`${tag} 有原文时应渲染原始记录行`, html.includes('dfv-raw-item'));
-      else check(`${tag} 没有原文时应渲染提示而不是空壳`, html.includes('dfv-raw-hint'));
-    }
-    if (turn.truncated === true && rawOpen) {
+    // 截断提示现在挂在回答区下面（原先挂在原始记录面板里）。
+    if (turn.truncated === true && fullOpen) {
       check(`${tag} 截断提示应出现`, html.includes(zh['card.truncated']));
-    }
-    if (turn.rawOmitted === true && rawOpen) {
-      check(`${tag} 省略提示应出现`, html.includes(zh['card.rawOmitted']));
     }
   }
   // 没有输入框接口时不该出现死按钮。
-  const htmlNoInput = await renderView([turn], [false, {}, {}, false, false], false);
+  const htmlNoInput = await renderView([turn], [false, {}, {}, false], false);
   check(`第${turn.turn}轮 无输入框接口时不渲染继续追问`, !htmlNoInput.includes(zh['card.followUp']));
 }
 

@@ -36,29 +36,30 @@ const must = [
   ['插件 CSS：实底卡面', /\.dfv-card\{[^}]*background-color:var\(--dsw-alias-bg-layer-1\)/],
   ['插件 CSS：叠压', /\.dfv-blocks\[data-open="false"\] \.dfv-block\{[^}]*margin-bottom:-6px/],
   ['插件 CSS：手风琴展开', /\.dfv-blocks\[data-open="true"\] \.dfv-block\{/],
-  ['插件 CSS：原始记录说明独占一行', /\.dfv-raw-note\{display:block/],
+  ['插件 CSS：回答全文按需渲染', /\.dfv-full\{[^}]*overflow-wrap:anywhere/],
   ['插件 CSS：用户提问气泡（官方气泡底色 token）', /\.dfv-ask-text\{[^}]*background-color:var\(--dsw-specific-bubble/],
   ['用户提问渲染出来了', /class="dfv-ask-text"/],
   ['插件 CSS：v1 小卡也在（一份 CSS 里两版共存）', /\.dfb-card\{/],
   ['默认叠压态的卡', /class="dfv-blocks" data-open="false"/],
   ['展开态的卡', /class="dfv-blocks" data-open="true"/],
-  ['原始记录已展开', /dfv-raw-body/],
+  ['回答区（卡里那块白底）', /class="dfv-answer"/],
   ['「完成 · 待你定 N」药丸', /待你定 \d/],
-  ['F2 退化（只剩总卡、没有信息块）', /pv-tag">② 点「展开/],
+  ['F2 退化（只剩总卡、没有信息块）', /pv-tag">③ 点「展开/],
   ['主题切换脚本', /data-act="theme"/],
   ['页面底色切换脚本', /data-act="page"/],
-  ['三种状态的标注', /① 默认[\s\S]*② 点「展开[\s\S]*③ 点开「原始记录/],
+  ['三种状态的标注', /① 点「展开回答全文[\s\S]*② 默认[\s\S]*③ 点「展开/],
   ['1~2 块直接铺开的说明（去掉日志后最常见的形态）', /直接铺开（不叠）/],
 ];
 for (const [label, pattern] of must) {
   if (!pattern.test(html)) problems.push(`缺少：${label}`);
 }
 
-// 反向：预览本身也不该带执行日志——它是给用户看的东西，留一点点残留都会误导。
+// 反向：预览本身也不该带执行日志或原始记录——它是给用户看的东西，留一点点残留都会误导。
 for (const [label, pattern] of [
   ['执行日志的时间线（.dfv-step）', /\.dfv-step/],
   ['步骤「详情」按钮', /dfv-step-open/],
   ['「执行过程」这个块名', /执行过程/],
+  ['原始记录模块（.dfv-raw / 「原始记录 N 条」）', /\.dfv-raw|原始记录 \d+ 条/],
 ]) {
   if (pattern.test(html)) problems.push(`不该有：${label}`);
 }

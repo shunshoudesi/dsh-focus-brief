@@ -451,7 +451,6 @@ const KPI_VALUE_LIMIT = 40;
 const RISK_MAX = 3;
 const RISK_ITEM_LIMIT = 120;
 const RISK_MIN_ITEM = 8;
-const RAW_MAX = 40;
 
 /** 风险小标题：只认模型自己划出的风险段，不在正文里扫关键词（扫关键词会命中大量解释性文字）。 */
 const RISK_HEADING = /风险|注意|警告|踩坑|副作用|局限|隐患|代价|失败/;
@@ -484,7 +483,8 @@ const TITLE_LINE = /^[ \t]*(?:【本轮】|\[本轮\]|本轮[：:])\s*(.+?)\s*$/
  * 但 30 轮 × 8000 字太大，所以只有最近这些轮带完整原文，更早的轮次只留提炼结果——
  * 「原始记录」本来就是拿来定位最近在干嘛的，回看很久以前的原文可以切回对话视图。
  */
-const RAW_TURN_LIMIT = 8;
+/** 最近多少轮带「回答全文」（更早的轮次只留提炼结果，`fullGone` 会说明）。 */
+const FULL_TURN_LIMIT = 8;
 const VIEW_ANSWER_LIMIT = 8000;
 
 /** 每条工具结果的说明最多留几份（一轮可能几十次工具调用，全留会把投影撑大）。 */
@@ -1050,18 +1050,11 @@ function foldViewEvent(state, event) {
  *
  * @param entry - 一轮的折叠状态。
  * @param isLast - 是不是最新一轮（决定“跑着”还是“被打断”）。
- * @param withRaw - 这一轮带不带原始记录（只有最近 RAW_TURN_LIMIT 轮带）。
+ * @param withFull - 这一轮带不带回答全文（只有最近 FULL_TURN_LIMIT 轮带）。
  */
-function viewTurnOf(entry, isLast, withRaw) {
+function viewTurnOf(entry, isLast, withFull) {
   const answer = entry.answer;
   const headline = answer === '' ? '' : headlineOf(answer);
-  // 只把原始记录要用的四个字段放进 wire；callId 这类内部索引字段不外传。
-  const tools = entry.tools.map((tool) => ({
-    label: tool.label,
-    detail: tool.detail,
-    status: tool.status,
-    note: tool.note,
-  }));
   const points = answer === '' ? [] : pointsOf(answer, headline);
   const kpis = answer === '' ? [] : kpisOf(answer);
   const risks = answer === '' ? [] : risksOf(answer);
@@ -1087,25 +1080,6 @@ function viewTurnOf(entry, isLast, withRaw) {
   if (points.length > 0) blocks.push({ id: 'points', items: points });
   if (risks.length > 0) blocks.push({ id: 'risks', items: risks.map((text) => ({ text })) });
 
-  // 原始记录的行数按“如果没有上限会有多少行”算，好让折叠行上的数字在省略时也是真的。
-  const rawTotal =
-    (entry.prompt === '' ? 0 : 1) + entry.said.length + tools.length + (entry.failure === '' ? 0 : 1) + (answer === '' ? 0 : 1);
-  const raw = [];
-  if (withRaw) {
-    if (entry.prompt !== '') raw.push({ kind: 'you', text: entry.prompt, meta: '' });
-    for (const said of entry.said) raw.push({ kind: 'said', text: said.text, meta: said.step });
-    for (const tool of tools) {
-      raw.push({
-        kind: 'tool',
-        text: tool.detail === '' ? tool.label : `${tool.label} · ${tool.detail}`,
-        meta: tool.status,
-        note: tool.note,
-      });
-    }
-    if (entry.failure !== '') raw.push({ kind: 'fail', text: entry.failure, meta: '' });
-    if (answer !== '') raw.push({ kind: 'answer', text: answer, meta: '' });
-  }
-
   return {
     turn: entry.turn,
     startSeq: entry.startSeq,
@@ -1124,9 +1098,11 @@ function viewTurnOf(entry, isLast, withRaw) {
     /** 只有附件、没有文字的提问（图片）——客户端画个占位，不然卡片上方会空着。 */
     promptMedia: entry.promptMedia,
     blocks: blocks.slice(0, 5),
-    raw: raw.slice(0, RAW_MAX),
-    rawTotal,
-    rawOmitted: !withRaw && rawTotal > 0,
+    // 「展开回答全文」要的那段原文：**只给最近 FULL_TURN_LIMIT 轮**（更早的轮次只留提炼结果）。
+    // 原先它是原始记录里的一行；用户把原始记录整个模块去掉之后，这里就直接送这一份。
+    full: withFull ? answer : '',
+    /** 这一轮有没有全文（没有时客户端明说「这轮较早，只保留提炼结果」）。 */
+    fullGone: !withFull && answer !== '',
     truncated: answer.length >= VIEW_ANSWER_LIMIT,
     counts: {
       files: entry.files.length,
@@ -1135,7 +1111,6 @@ function viewTurnOf(entry, isLast, withRaw) {
       points: points.length,
       risks: risks.length,
       asks: asks.length,
-      raw: rawTotal,
     },
     steps: entry.steps,
     chars: answer.length,
@@ -1153,7 +1128,7 @@ const viewDefinition = {
     view: (state) => {
       const last = state.turns.at(-1);
       return state.turns.map((entry, index) =>
-        viewTurnOf(entry, entry === last, index >= state.turns.length - RAW_TURN_LIMIT),
+        viewTurnOf(entry, entry === last, index >= state.turns.length - FULL_TURN_LIMIT),
       );
     },
   },

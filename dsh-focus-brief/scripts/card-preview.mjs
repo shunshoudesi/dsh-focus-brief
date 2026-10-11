@@ -2,9 +2,9 @@
  * 一次性检视：把真实轮次渲染成 HTML 后剥掉标签，按“肉眼读一遍卡片”的方式打印出来。
  * SSR 断言只能证明“渲染没坏”，证明不了“读起来像样”——这一步补的就是后者。
  *
- * 用法: node card-preview.mjs [会话序号] [轮次数量] [--state wait|run|fail|interrupt|done] [--raw]
+ * 用法: node card-preview.mjs [会话序号] [轮次数量] [--state wait|run|fail|interrupt|done] [--full]
  *   --state  只看某个状态的轮次（默认看最后一轮）
- *   --raw    连「原始记录」一起打开
+ *   --full   连「回答全文」一起打开
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -46,13 +46,13 @@ const file = files[numeric(process.argv[2], 0)]?.full ?? files[0].full;
 const count = numeric(process.argv[3], 4);
 const stateIndex = process.argv.indexOf('--state');
 const wantedState = stateIndex === -1 ? null : process.argv[stateIndex + 1];
-const withRaw = process.argv.includes('--raw');
+const withFull = process.argv.includes('--full');
 
 let state = viewDefinition.init();
 for (const event of readSessionEvents(file)) state = viewDefinition.apply(state, event);
 const allTurns = viewDefinition.wire.view(state);
 const turns = wantedState === null ? allTurns : allTurns.filter((turn) => turn.state === wantedState);
-console.log(`会话 ${path.basename(path.dirname(file))}，共 ${allTurns.length} 轮${wantedState === null ? '' : `（其中 ${turns.length} 轮是 ${wantedState}）`}，打印最后 ${count} 轮${withRaw ? '（原始记录已打开）' : ''}\n`);
+console.log(`会话 ${path.basename(path.dirname(file))}，共 ${allTurns.length} 轮${wantedState === null ? '' : `（其中 ${turns.length} 轮是 ${wantedState}）`}，打印最后 ${count} 轮${withFull ? '（回答全文已打开）' : ''}\n`);
 
 let loaded = null;
 globalThis.window = { __ModuleLoader__: { load: (module) => (loaded = module) } };
@@ -79,9 +79,9 @@ const zh = dictionaries['focus-brief'].zh;
 const t = (key, params) =>
   (zh[key] ?? `MISSING:${key}`).replace(/\{(\w+)\}/g, (whole, name) => (params !== undefined && name in params ? String(params[name]) : whole));
 
-/** 固定展开态：每块内容都可见（--raw 时连原始记录一起打开）。 */
+/** 固定展开态：每块内容都可见（--full 时连回答全文一起打开）。 */
 function shimmed() {
-  const queue = [true, {}, {}, withRaw];
+  const queue = [true, {}, {}, withFull];
   let index = 0;
   const shim = { ...react, useState: (initial) => [index < queue.length ? queue[index++] : initial, () => {}] };
   let View = null;

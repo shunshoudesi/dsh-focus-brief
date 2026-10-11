@@ -195,23 +195,21 @@ async function renderTurns(turns, perCard) {
 
 const sections = [];
 for (const turn of picked) {
-  const deck = await renderTurns([turn], [false, {}, {}, false, false]);
-  const expanded = await renderTurns([turn], [true, {}, {}, false, false]);
-  const raw = await renderTurns([turn], [true, {}, {}, true, false]);
-  // 第 5 个 useState 是「展开回答全文」——这一格才是新增的气泡本体。
-  const answerFull = await renderTurns([turn], [true, {}, {}, false, true]);
+  const deck = await renderTurns([turn], [false, {}, {}, false]);
+  const expanded = await renderTurns([turn], [true, {}, {}, false]);
+  // 第 4 个 useState 是「展开回答全文」——原始记录模块删掉之后它是最后一个开关。
+  const answerFull = await renderTurns([turn], [true, {}, {}, true]);
   const title = turn.title === '' ? `第 ${turn.turn} 轮` : turn.title;
   // >2 块才叠成一摞；1~2 块按设计直接铺开，两种形态的说明必须分开写，不然会让人以为抖不出叠压效果。
-  const deckTag = turn.blocks.length > 2 ? '① 默认：信息块叠压成一摞' : `① 默认：只有 ${turn.blocks.length} 个块，直接铺开（不叠）`;
-  const hasAnswer = (turn.raw ?? []).some((row) => row.kind === 'answer');
+  const deckTag = turn.blocks.length > 2 ? '② 默认：信息块叠压成一摞' : `② 默认：只有 ${turn.blocks.length} 个块，直接铺开（不叠）`;
+  const hasAnswer = turn.full !== '';
   sections.push(`
   <section class="pv-section">
     <div class="pv-cap">会话 ${turn.session.slice(-8)} · 第 ${turn.turn} 轮 · 状态 ${turn.state}${turn.decisions > 0 ? ` · 待你定 ${turn.decisions}` : ''} · 正文 ${turn.chars} 字 · 工具 ${turn.counts.tools} 次 —— <b>${escapeHtml(title)}</b></div>
     <div class="pv-pair">
-      <div><div class="pv-tag">④ 点「展开回答全文」：回答气泡里换成全文${hasAnswer ? '' : '（这一轮没有全文可展开，这个按钮不出现）'}</div>${answerFull}</div>
+      <div><div class="pv-tag">① 点「展开回答全文」：回答区里换成全文${hasAnswer ? '' : '（这一轮没有全文可展开，这个按钮不出现）'}</div>${answerFull}</div>
       <div><div class="pv-tag">${deckTag}</div>${deck}</div>
-      <div><div class="pv-tag">② 点「展开 N 个信息块」后：纵向手风琴</div>${expanded}</div>
-      <div><div class="pv-tag">③ 点开「原始记录 N 条」：点开才渲染</div>${raw}</div>
+      <div><div class="pv-tag">③ 点「展开 N 个信息块」后：纵向手风琴</div>${expanded}</div>
     </div>
   </section>`);
 }
@@ -268,13 +266,11 @@ ${injected}
 </div>
 ${sections.join('\n')}
 <div class="pv-note">
-  <b>看什么：</b>① 信息块超过 2 个时那一摞有没有「叠在一起」的感觉（层间只叠 6px，底下两层缩窄的纸边）；
-  ② <b>回答气泡</b>：底色用官方对话那条气泡自己的 token（浅色 <code>#edf3fe</code> / 深色 <code>#2c2c2e</code>）、
-  字色 <code>label-primary</code>，默认只显示那句结论，点「展开回答全文」才换成全文（换主题按钮自己比）；
-  ③ 卡片边界在<b>白页面</b>下是否糊在背景里（实测发丝边对页面底只有 1.26:1，这就是我提议把页面压灰一档的原因）；
-  ④ 展开后会不会太长（默认每块只露 3~5 项，其余收进「还有 N 个」）；
-  ⑤ <b>执行日志已经不在这张卡上了</b>——工具调用时间线、每一步的「详情」全部去掉，卡片只放回答本身拆出来的东西，
-  那套日志仍在官方「轨迹」视图里。代价是：实测 176 轮里 149 轮只剩 1~2 块，于是按设计不叠、直接铺开（上面第 2 组就是这种最常见的样子）。
+  <b>看什么：</b>① <b>你输入的原话</b>就在每轮卡片上方那条蓝底黑字气泡里（官方气泡自己的 token，一字不改）；
+  ② 卡片里是<b>回答</b>：默认一句话结论，点「展开回答全文」换成全文（markdown 渲染成元素，不是源码）；
+  ③ 信息块超过 2 个时那一摞有没有「叠在一起」的感觉（层间只叠 6px，底下两层缩窄的纸边）；
+  ④ 卡片边界在<b>白页面</b>下是否糊在背景里（实测发丝边对页面底只有 1.26:1，按上面的按钮自己比）。
+  <br>卡片上<b>没有执行日志、也没有原始记录模块</b>：工具调用时间线在官方「轨迹」视图里；回答全文就在这块卡片上。
 </div>
 <script>
 (function () {
@@ -313,7 +309,7 @@ function globalsCssSafe(scope, extra) {
 const out = PREVIEW;
 fs.writeFileSync(out, html, 'utf8');
 const kb = Math.round(fs.statSync(out).size / 1024);
-console.log(`写出 ${out}：${kb} KB，${picked.length} 轮 × 4 种状态，CSS ${injected.length} 字符`);
+console.log(`写出 ${out}：${kb} KB，${picked.length} 轮 × 3 种状态，CSS ${injected.length} 字符`);
 console.log(`轮次：${picked.map((turn) => `${turn.session.slice(-8)}#${turn.turn}(${turn.state}${turn.decisions > 0 ? `,待你定${turn.decisions}` : ''},块${turn.blocks.length})`).join(' ')}`);
 console.log(`缺少的字典键：${[...new Set((html.match(/MISSING:[a-z.]+/g) ?? []))].join(' ') || '无'}`);
 console.log(`两套主题都有 token：浅 ${scopes[0].length} 字符 / 深 ${scopes[1].length} 字符`);

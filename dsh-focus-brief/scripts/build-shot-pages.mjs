@@ -48,13 +48,13 @@ const pick = (predicate) => pool.filter(predicate).at(-1) ?? null;
 const has = (turn, id) => (turn?.blocks ?? []).some((block) => block.id === id);
 
 const CASES = [
-  ['answer-full', (turn) => (turn.raw?.length ?? 0) > 8, [true, {}, {}, false, true]],
-  ['raw', (turn) => (turn.raw?.length ?? 0) > 8, [true, {}, {}, true, false]],
-  ['asks-risks', (turn) => has(turn, 'asks') && has(turn, 'risks'), [true, {}, {}, false, false]],
-  ['decide-pill', (turn) => turn.state === 'done' && (turn.decisions ?? 0) > 0, [false, {}, {}, false, false]],
-  ['block-collapsed', (turn) => has(turn, 'points') && (turn.blocks ?? []).length >= 3, [true, { points: true }, {}, false, false]],
-  ['f2-no-blocks', (turn) => (turn.blocks ?? []).length === 0, [false, {}, {}, false, false]],
-  ['interrupt', (turn) => turn.state === 'interrupt', [false, {}, {}, false, false]],
+  ['answer-full', (turn) => (turn.full ?? '').length > 600, [true, {}, {}, true]],
+  ['ask-only', (turn) => turn.prompt !== '' && (turn.blocks ?? []).length === 0, [false, {}, {}, false]],
+  ['asks-risks', (turn) => has(turn, 'asks') && has(turn, 'risks'), [true, {}, {}, false]],
+  ['decide-pill', (turn) => turn.state === 'done' && (turn.decisions ?? 0) > 0, [false, {}, {}, false]],
+  ['block-collapsed', (turn) => has(turn, 'points') && (turn.blocks ?? []).length >= 3, [true, { points: true }, {}, false]],
+  ['f2-no-blocks', (turn) => (turn.blocks ?? []).length === 0, [false, {}, {}, false]],
+  ['interrupt', (turn) => turn.state === 'interrupt', [false, {}, {}, false]],
 ];
 
 /* ---------- 客户端半 ---------- */
@@ -148,6 +148,14 @@ const shotsDir = path.join(ROOT, '.tmp', 'shots');
 fs.mkdirSync(shotsDir, { recursive: true });
 
 const written = [];
+// 先删掉这一轮不再产出的旧页面：否则上一轮的 `case-*.html` 会继续被 shoot-pages 截成新图，
+// 取证目录里就出现了「已经不存在的用例的截图」。
+const liveIds = new Set(CASES.map(([id]) => `case-${id}.html`));
+for (const stale of fs.existsSync(shotsDir) ? fs.readdirSync(shotsDir).filter((name) => /^case-.*\.(html|png)$/.test(name)) : []) {
+  if (stale.endsWith('.png') || liveIds.has(stale)) continue;
+  fs.rmSync(path.join(shotsDir, stale));
+  console.log(`  清理过期用例 ${stale}`);
+}
 for (const [id, predicate, queue] of CASES) {
   const turn = pick(predicate);
   if (turn === null) {
@@ -162,7 +170,7 @@ body{margin:0;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-pr
 .foot{max-width:720px;margin:0 auto;padding:8px 18px 40px;font-size:12px;color:var(--dsw-alias-label-secondary)}
 ${injected}
 </style></head><body>
-<div class="foot">case ${id} ｜ 第 ${turn.turn} 轮 ｜ 状态 ${turn.state}${turn.decisions > 0 ? ` · 待你定 ${turn.decisions}` : ''} ｜ 块 ${(turn.blocks ?? []).map((block) => block.id).join('/') || '无'} ｜ 原始记录 ${turn.rawTotal} 条</div>
+<div class="foot">case ${id} ｜ 第 ${turn.turn} 轮 ｜ 状态 ${turn.state}${turn.decisions > 0 ? ` · 待你定 ${turn.decisions}` : ''} ｜ 块 ${(turn.blocks ?? []).map((block) => block.id).join('/') || '无'} ｜ 全文 ${turn.full === '' ? '无（这轮较早）' : `${turn.full.length} 字`}</div>
 ${cards}
 </body></html>`;
   const out = path.join(shotsDir, `case-${id}.html`);
