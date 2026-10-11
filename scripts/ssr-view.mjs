@@ -462,6 +462,20 @@ for (const turn of allTurns) {
       } else {
         check(`${tag} 未展开时应给「展开回答全文」`, html.includes(zh['card.fullOpen'].replace('{count}', String(fullText.length))));
         check(`${tag} 未展开时应只有那句结论`, html.includes('dfv-value') && !html.includes('class="dfv-full"'));
+        // 闸门：**结论那一行不许被截断**（用户要求「这个部分不设字符上限」）。
+        // 两条都要有，因为历史上这里有两道裁切：
+        // ① 宿主的字符上限（结论超过上限会带「…」）——这里断言渲染出来的那段结论是**原样的完整内容**；
+        // ② 客户端 CSS 的 `-webkit-line-clamp:2`（只显示两行，超出无声裁掉）——这里断言那条规则里
+        //    没有任何隐藏欲裁的声明（line-clamp / box-orient / overflow:hidden）。
+        // 只断言「文字在 HTML 里」是不够的：CSS 裁切时文字照样在 HTML 里，只是不显示。
+        if (turn.headline !== '') {
+          const answerAt = html.indexOf('dfv-answer');
+          const valueAt = html.indexOf('dfv-value', answerAt < 0 ? 0 : answerAt);
+          const valueEnd = valueAt < 0 ? -1 : html.indexOf('</div>', valueAt);
+          const valueHtml = valueAt < 0 ? '' : html.slice(valueAt, valueEnd < 0 ? valueAt + 400 : valueEnd);
+          const plainValue = valueHtml.replace(/<[^>]*>/g, '');
+          check(`${tag} 结论行渲染的是完整内容（没被字符上限裁断）`, plainValue.includes(escapeHtml(turn.headline)), turn.headline.slice(0, 40));
+        }
       }
     } else {
       check(`${tag} 没有全文时不该给「展开回答全文」`, !html.includes('dfv-full-toggle'));

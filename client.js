@@ -203,7 +203,11 @@ window.__ModuleLoader__.load({
       '.dfv-state{flex:none;font-size:11px;font-weight:600;line-height:18px;padding:1px 8px;border-radius:999px;background-color:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-primary);white-space:nowrap}',
       /* 各状态的兜底底色：color-mix 不可用时药丸只是没有色相，文字照样清楚。 */
       '.dfv-state[data-state="done"],.dfv-state[data-state="run"],.dfv-state[data-state="wait"],.dfv-state[data-state="fail"],.dfv-state[data-state="interrupt"]{background-color:var(--dsw-alias-bg-layer-2)}',
-      '.dfv-value{margin:0;font-size:15px;line-height:1.55;color:var(--dsw-alias-label-primary);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}',
+      /* 结论那一行：**不设任何长度上限**（用户要求「这个部分不设字符上限」）。
+         原先这里是 display:-webkit-box + -webkit-line-clamp:2 —— 只显示两行、超出直接裁掉，
+         实测就是这么把一轮的结论从「…已提交推送：7d535c3。」后面裁断的（卡片明明有地方，
+         却先切一刀，读的人只会以为助手没写完）。现在整段照排，换行交给容器宽度。 */
+      '.dfv-value{margin:0;font-size:15px;line-height:1.55;color:var(--dsw-alias-label-primary);overflow-wrap:anywhere}',
       '.dfv-value[data-empty="true"]{color:var(--dsw-alias-label-secondary);font-size:13.5px}',
       /* ---------- 回答：就在卡片里 ---------- */
       /* 回答**不再**用蓝底：官方那边蓝底是「你的消息」，这一版按用户要求把提问单独摆出来、

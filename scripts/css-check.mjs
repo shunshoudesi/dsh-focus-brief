@@ -183,6 +183,11 @@ for (const [label, pattern] of [
   ['原始记录的文案键（card.raw / a11y.raw / raw.*）', /card\.raw|a11y\.raw|\braw\.(?:you|said|tool|error|answer)/],
   // 蓝底只给「你的提问」：官方那边蓝底就是用户消息。回答留在卡片里、白底（用户明确要求分开）。
   ['回答上的气泡底色（.dfv-answer 不该有 background）', /\.dfv-answer\{[^}]*background/],
+  // 结论那一行不许再被 CSS 无声裁掉（用户要求「这个部分不设字符上限」）：
+  // 原先 `.dfv-value` 上有 `-webkit-line-clamp:2` + `overflow:hidden`，两行以外**不显示但文字仍在**，
+  // 连 SSR 的「文字在 HTML 里」断言都查不出来——只有 CSS 这一层能钉住它。
+  ['结论行的两行截断（.dfv-value 不该有 line-clamp / box-orient）', /\.dfv-value\{[^}]*(?:line-clamp|box-orient)/],
+  ['结论行的隐藏溢出（.dfv-value 不该有 overflow:hidden）', /\.dfv-value\{[^}]*overflow:\s*hidden/],
 ]) {
   if (pattern.test(css)) problems.push(`${label}又出现在样式里了`);
 }

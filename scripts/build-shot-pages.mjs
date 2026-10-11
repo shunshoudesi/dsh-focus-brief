@@ -55,6 +55,11 @@ const CASES = [
   ['block-collapsed', (turn) => has(turn, 'points') && (turn.blocks ?? []).length >= 3, [true, { points: true }, {}, false]],
   ['f2-no-blocks', (turn) => (turn.blocks ?? []).length === 0, [false, {}, {}, false]],
   ['interrupt', (turn) => turn.state === 'interrupt', [false, {}, {}, false]],
+  // 结论最长的那一轮：专门用来看「结论那一行会不会被裁」。
+  // 以前这里有两道裁切（宿主 200 字上限 + 客户端 `-webkit-line-clamp:2`），
+  // 后者是**无声**的——文字在 HTML 里、只是不显示，所以只有截图能看出来。
+  ['conclusion-long', (turn) => turn.headline.length > 120, [false, {}, {}, false]],
+  ['conclusion-longest', (turn) => turn.headline.length === Math.max(...pool.map((item) => item.headline.length)) && turn.headline.length > 0, [false, {}, {}, false]],
 ];
 
 /* ---------- 客户端半 ---------- */
@@ -148,14 +153,10 @@ const shotsDir = path.join(ROOT, '.tmp', 'shots');
 fs.mkdirSync(shotsDir, { recursive: true });
 
 const written = [];
-// 先删掉这一轮不再产出的旧页面：否则上一轮的 `case-*.html` 会继续被 shoot-pages 截成新图，
-// 取证目录里就出现了「已经不存在的用例的截图」。
-const liveIds = new Set(CASES.map(([id]) => `case-${id}.html`));
-for (const stale of fs.existsSync(shotsDir) ? fs.readdirSync(shotsDir).filter((name) => /^case-.*\.(html|png)$/.test(name)) : []) {
-  if (stale.endsWith('.png') || liveIds.has(stale)) continue;
-  fs.rmSync(path.join(shotsDir, stale));
-  console.log(`  清理过期用例 ${stale}`);
-}
+const produced = new Set();
+// 先收集这一轮要产出的用例、再删旧页面：删除必须按「**真的产出了**」而不是按「用例在清单里」——
+// 用例在清单里但语料里没有样本时会被跳过，上一轮的 `case-*.html` 就会继续被 shoot-pages 截成新图，
+// 取证目录里于是躺着一张「已经不存在的用例的截图」（这次 `asks-risks` 就是这么留下的）。
 for (const [id, predicate, queue] of CASES) {
   const turn = pick(predicate);
   if (turn === null) {
@@ -175,7 +176,15 @@ ${cards}
 </body></html>`;
   const out = path.join(shotsDir, `case-${id}.html`);
   fs.writeFileSync(out, page, 'utf8');
+  produced.add(`case-${id}.html`);
   written.push(`case-${id}（第 ${turn.turn} 轮 / ${turn.state} / 块 ${(turn.blocks ?? []).length}）`);
+}
+// 删掉**这一轮没产出的**旧页面（用例被删掉、或语料里没样本而被跳过）：
+// 否则上一轮的 .html 会继续被 shoot-pages 截成新图，看起来像「新用例也拍到了」。
+for (const stale of fs.existsSync(shotsDir) ? fs.readdirSync(shotsDir).filter((name) => /^case-.*\.html$/.test(name)) : []) {
+  if (produced.has(stale)) continue;
+  fs.rmSync(path.join(shotsDir, stale));
+  console.log(`  清理过期用例 ${stale}`);
 }
 console.log(`写出 ${written.length} 个取证页到 .tmp/shots/：`);
 for (const line of written) console.log(`  ${line}`);
