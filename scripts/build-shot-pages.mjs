@@ -201,6 +201,97 @@ const globalTokens = [...new Map([...source.matchAll(/(--dsw-[a-z0-9-]+)\s*:\s*(
 const shotsDir = path.join(ROOT, '.tmp', 'shots');
 fs.mkdirSync(shotsDir, { recursive: true });
 
+/** 取证页外壳：主题 token + 插件实际注入的 CSS + 水印 + 卡片。
+ *  水印默认可见（工作台里一眼看清这是哪一轮）；`CLEAN=1` 时收进 HTML 注释——
+ *  README / 插件市场截图要的是「画面上没有夹具痕迹」，但信息不能丢。 */
+function pageFor(title, cards, caption) {
+  const foot = caption === '' ? '' : process.env.CLEAN === '1' ? `<!-- ${caption} -->` : `<div class="foot">${caption}</div>`;
+  return `<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><title>${title}</title><style>
+:root{${globalTokens};${scopeLines[0]}}
+body{margin:0;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-family:"Microsoft YaHei",sans-serif}
+.foot{max-width:720px;margin:0 auto;padding:8px 18px 40px;font-size:12px;color:var(--dsw-alias-label-secondary)}
+${injected}
+</style></head><body>
+${foot}
+${cards}
+</body></html>`;
+}
+
+/* README / 插件市场用的**演示**轮次：内容中立（一个普通的开发任务）、五个块齐全、
+ *  产出文件 7 项（> 预览 5 项，底部那颗「还有 N 个 / 收起这块」才会出现）。
+ *  为什么要另起一轮：仓库要公开，取证页里的真实会话内容（真实提问、真实回答）不该跟着上去；
+ *  而 9001 那轮是「验证展开整摞」的合成轮次，标题里写着「验证」，摆进 README 像夹具。
+ *  `DEMO=1` 才产出，默认不生成。 */
+const DEMO_FULL = [
+  '把同步导出改成异步任务，分三步：',
+  '',
+  '1. 接口层：POST /api/report/export 不再等到文件写完，落一条任务记录后立刻返回 taskId；同一份查询条件在 5 分钟内直接复用旧任务，避免重复排队。',
+  '2. 队列层：任务进 export_queue，worker 按并发上限取任务；取任务时写一个 60 秒租约，租约到期没续上的任务允许被重新取，防同一个任务被两个 worker 同时导出。失败按 1s / 4s / 16s 退避重试三次，三次都失败就把任务标记为 failed，并把最后一次错误留在任务上。',
+  '3. 前端：拿到 taskId 后每 2 秒轮询一次任务状态，done 时把文件地址交给原来的下载逻辑；页面切走就停轮询，回来再续。',
+  '',
+  '风险与验证：轮询会让任务列表页多出读请求；任务超时上限设成 10 分钟，超时后释放并发位。测试补了队列抢占、租约过期、退避序列和超时释放四组用例，共 11 个。',
+].join('\n');
+
+const DEMO_TURN = {
+  turn: 42,
+  startSeq: 0,
+  time: Date.UTC(2026, 9, 11, 1, 20),
+  state: 'done',
+  stateReason: '',
+  decisions: 2,
+  title: '导出报表改异步 + 失败重试',
+  headline: '同步导出改成入队后立刻返回任务号、前端轮询取结果，重试按 1s / 4s / 16s 退避走三次。',
+  prompt: '把导出报表的接口从同步改成异步任务，顺便补上失败重试。',
+  promptMedia: 0,
+  blocks: [
+    { id: 'asks', items: [{ text: '并发上限沿用现在的 4，还是提到 8？' }, { text: '旧的同步接口要不要留一个版本兼容？' }] },
+    {
+      id: 'kpi',
+      items: [
+        { k: '改动文件', v: '6' },
+        { k: '新增测试', v: '11' },
+        { k: '重试上限', v: '3' },
+        { k: '任务超时', v: '10 min' },
+      ],
+    },
+    {
+      id: 'files',
+      items: [
+        { path: 'server/api/report.ts', name: 'report.ts', dir: 'api', ext: 'TS' },
+        { path: 'server/jobs/export-queue.ts', name: 'export-queue.ts', dir: 'jobs', ext: 'TS' },
+        { path: 'server/jobs/retry-policy.ts', name: 'retry-policy.ts', dir: 'jobs', ext: 'TS' },
+        { path: 'server/jobs/worker.ts', name: 'worker.ts', dir: 'jobs', ext: 'TS' },
+        { path: 'web/report/export-button.tsx', name: 'export-button.tsx', dir: 'report', ext: 'TSX' },
+        { path: 'web/report/poll-task.ts', name: 'poll-task.ts', dir: 'report', ext: 'TS' },
+        { path: 'tests/export-queue.test.ts', name: 'export-queue.test.ts', dir: 'tests', ext: 'TS' },
+      ],
+    },
+    {
+      id: 'points',
+      items: [
+        { depth: 0, text: '入队后立刻返回任务号，前端改成 2 秒轮询' },
+        { depth: 0, text: '失败重试按指数退避，超过三次标记为失败' },
+        { depth: 1, text: '超时上限 10 分钟，超时后释放占用的并发位' },
+      ],
+    },
+    {
+      id: 'risks',
+      items: [
+        { text: '轮询间隔 2 秒，任务列表页在高峰期会多出约三成读请求' },
+        { text: '重试期间同一个任务可能被两个 worker 同时取到，需要加租约' },
+        { text: '旧的同步接口保留期间，两条链路的导出结果需要比对一次' },
+      ],
+    },
+  ],
+  full: DEMO_FULL,
+  fullGone: false,
+  truncated: false,
+  counts: { files: 7, tools: 12, kpi: 4, points: 3, risks: 3, asks: 2 },
+  steps: 12,
+  chars: DEMO_FULL.length,
+};
+
 const written = [];
 const produced = new Set();
 // 先收集这一轮要产出的用例、再删旧页面：删除必须按「**真的产出了**」而不是按「用例在清单里」——
@@ -213,24 +304,31 @@ for (const [id, predicate, queue] of CASES) {
     continue;
   }
   const cards = await renderOne(turn, queue);
-  const page = `<!DOCTYPE html>
-<html lang="zh-CN"><head><meta charset="UTF-8"><title>case-${id}</title><style>
-:root{${globalTokens};${scopeLines[0]}}
-body{margin:0;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-family:"Microsoft YaHei",sans-serif}
-.foot{max-width:720px;margin:0 auto;padding:8px 18px 40px;font-size:12px;color:var(--dsw-alias-label-secondary)}
-${injected}
-</style></head><body>
-<div class="foot">case ${id} ｜ 第 ${turn.turn} 轮 ｜ 状态 ${turn.state}${turn.decisions > 0 ? ` · 待你定 ${turn.decisions}` : ''} ｜ 块 ${(turn.blocks ?? []).map((block) => block.id).join('/') || '无'} ｜ 全文 ${turn.full === '' ? '无（这轮较早）' : `${turn.full.length} 字`}</div>
-${cards}
-</body></html>`;
+  const caption = `case ${id} ｜ 第 ${turn.turn} 轮 ｜ 状态 ${turn.state}${turn.decisions > 0 ? ` · 待你定 ${turn.decisions}` : ''} ｜ 块 ${(turn.blocks ?? []).map((block) => block.id).join('/') || '无'} ｜ 全文 ${turn.full === '' ? '无（这轮较早）' : `${turn.full.length} 字`}`;
+  const page = pageFor(`case-${id}`, cards, caption);
   const out = path.join(shotsDir, `case-${id}.html`);
   fs.writeFileSync(out, page, 'utf8');
   produced.add(`case-${id}.html`);
   written.push(`case-${id}（第 ${turn.turn} 轮 / ${turn.state} / 块 ${(turn.blocks ?? []).length}）`);
 }
+// 演示轮次的四个形态：叠压 / 展开只出标题行 / 点开产出文件（5 行 + 还有 2 个 + 收起这块）/ 铺开全部 7 行。
+// 水印一律不带（caption 传空串）：这几张是给外面看的。
+if (process.env.DEMO === '1') {
+  for (const [id, queue] of [
+    ['view-collapsed', [false, {}, {}]],
+    ['view-blocks', [true, {}, {}]],
+    ['view-open', [true, { files: true }, {}]],
+    ['view-open-all', [true, { files: true }, { files: true }]],
+  ]) {
+    const cards = await renderOne(DEMO_TURN, queue);
+    fs.writeFileSync(path.join(shotsDir, `demo-${id}.html`), pageFor(`demo-${id}`, cards, ''), 'utf8');
+    produced.add(`demo-${id}.html`);
+    written.push(`demo-${id}（演示轮次）`);
+  }
+}
 // 删掉**这一轮没产出的**旧页面（用例被删掉、或语料里没样本而被跳过）：
 // 否则上一轮的 .html 会继续被 shoot-pages 截成新图，看起来像「新用例也拍到了」。
-for (const stale of fs.existsSync(shotsDir) ? fs.readdirSync(shotsDir).filter((name) => /^case-.*\.html$/.test(name)) : []) {
+for (const stale of fs.existsSync(shotsDir) ? fs.readdirSync(shotsDir).filter((name) => /^(?:case|demo)-.*\.html$/.test(name)) : []) {
   if (produced.has(stale)) continue;
   fs.rmSync(path.join(shotsDir, stale));
   console.log(`  清理过期用例 ${stale}`);

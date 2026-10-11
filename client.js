@@ -18,7 +18,7 @@
  */
 
 window.__ModuleLoader__.load({
-  id: '@local/dsh-focus-brief',
+  id: 'dsh-focus-brief',
   factory(require) {
     const React = require('react');
     const h = React.createElement;
@@ -31,7 +31,7 @@ window.__ModuleLoader__.load({
     /** 专注视图的 id（View 标签里显示 label）。 */
     const VIEW_ID = 'focus';
     /** CSS 标签标识，避免重复注入。 */
-    const CSS_TAG_ID = '@local/dsh-focus-brief/card.css';
+    const CSS_TAG_ID = 'dsh-focus-brief/card.css';
     /** 空数组常量：`useProjection` 的返回值按引用比较，每次新建数组会让组件反复重渲染。 */
     const EMPTY_TURNS = [];
 
@@ -1186,7 +1186,7 @@ function toggleFlag(map, key) {
             if (typeof document === 'undefined') return () => {};
             if (document.querySelector(`style[data-plugin-css="${CSS_TAG_ID}"]`) !== null) return () => {};
             const tag = document.createElement('style');
-            tag.dataset.plugin = '@local/dsh-focus-brief';
+            tag.dataset.plugin = 'dsh-focus-brief';
             tag.dataset.pluginCss = CSS_TAG_ID;
             tag.textContent = `${CSS}${BRIEF_CSS}`;
             document.head.appendChild(tag);
@@ -1215,7 +1215,7 @@ function toggleFlag(map, key) {
           ctx.slots.register(
             {
               name: 'conversation.chat.turnTail',
-              id: '@local/dsh-focus-brief',
+              id: 'dsh-focus-brief',
               order: -10,
               locale: NS,
             },

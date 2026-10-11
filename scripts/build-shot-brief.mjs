@@ -96,8 +96,8 @@ const zh = dictionaries['focus-brief'].zh;
 const t = (key, params) =>
   (zh[key] ?? `MISSING:${key}`).replace(/\{(\w+)\}/g, (whole, name) => (params !== undefined && name in params ? String(params[name]) : whole));
 
-/** `open` 是 v1 组件里的第一个 useState。 */
-async function render(open) {
+/** `open` 是 v1 组件里的第一个 useState；`sample` 默认取语料里那张最足的卡。 */
+async function render(open, sample = brief) {
   const queue = [open];
   const shim = { ...react, useState: (initial) => [queue.shift() ?? initial, () => {}] };
   let View = null;
@@ -118,8 +118,8 @@ async function render(open) {
   const stream = await server.renderToReadableStream(
     react.createElement(View, {
       t,
-      turn: { turn: brief.turn },
-      useProjection: (key, selector) => (selector === undefined ? [brief] : selector([brief])),
+      turn: { turn: sample.turn },
+      useProjection: (key, selector) => (selector === undefined ? [sample] : selector([sample])),
     }),
   );
   return await new Response(stream).text();
@@ -152,6 +152,24 @@ const globalTokens = [...new Map([...source.matchAll(/(--dsw-[a-z0-9-]+)\s*:\s*(
 
 const shotsDir = path.join(ROOT, '.tmp', 'shots');
 fs.mkdirSync(shotsDir, { recursive: true });
+
+/** 取证页外壳（与 v2 取证页同一套写法）：主题 token + 插件实际注入的 CSS + 水印 + 卡片。
+ *  水印 `CLEAN=1` 时收进 HTML 注释；caption 传空串则完全不带（给外面看的截图）。 */
+function pageOf(title, card, scope, caption) {
+  const foot = caption === '' ? '' : process.env.CLEAN === '1' ? `<!-- ${caption} -->` : `<div class="foot">${caption}</div>`;
+  return `<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><title>${title}</title><style>
+:root{${globalTokens};${scope}}
+body{margin:0;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-family:"Microsoft YaHei",sans-serif}
+.wrap{max-width:720px;margin:0 auto;padding:18px 18px 40px}
+.foot{padding:6px 2px 0;font-size:12px;color:var(--dsw-alias-label-secondary)}
+${injected}
+</style></head><body><div class="wrap">
+${foot}
+${card}
+</div></body></html>`;
+}
+
 const written = [];
 for (const [id, open] of [
   ['closed', false],
@@ -162,22 +180,41 @@ for (const [id, open] of [
     ['light', scopeLines[0]],
     ['dark', scopeLines[1]],
   ]) {
-    const page = `<!DOCTYPE html>
-<html lang="zh-CN"><head><meta charset="UTF-8"><title>brief-${id}-${theme}</title><style>
-:root{${globalTokens};${scope}}
-body{margin:0;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-family:"Microsoft YaHei",sans-serif}
-.wrap{max-width:720px;margin:0 auto;padding:18px 18px 40px}
-.foot{padding:6px 2px 0;font-size:12px;color:var(--dsw-alias-label-secondary)}
-${injected}
-</style></head><body><div class="wrap">
-<div class="foot">brief ${id} · ${theme} ｜ 第 ${brief.turn} 轮 ｜ 要点 ${brief.bullets.length} · 待定 ${brief.asks.length} · 提问 ${brief.prompt === '' ? '无' : `${brief.prompt.length} 字`}</div>
-${card}
-</div></body></html>`;
+    const caption = `brief ${id} · ${theme} ｜ 第 ${brief.turn} 轮 ｜ 要点 ${brief.bullets.length} · 待定 ${brief.asks.length} · 提问 ${brief.prompt === '' ? '无' : `${brief.prompt.length} 字`}`;
     const out = path.join(shotsDir, `brief-${id}-${theme}.html`);
-    fs.writeFileSync(out, page, 'utf8');
+    fs.writeFileSync(out, pageOf(`brief-${id}-${theme}`, card, scope, caption), 'utf8');
     written.push(`brief-${id}-${theme}`);
   }
 }
-console.log(`写出 ${written.length} 个 v1 取证页到 .tmp/shots/：${written.join('、')}`);
+
+/* README / 插件市场用的**演示**卡：内容中立（同 v2 演示轮次那件事），启用 `DEMO=1` 才产出。
+ *  为什么不直接用上面那张「料最足」的真实卡：仓库要公开，真实卡的提问与要点是会话原文。 */
+if (process.env.DEMO === '1') {
+  const demo = {
+    turn: 42,
+    startSeq: 0,
+    prompt: '把导出报表的接口从同步改成异步任务，顺便补上失败重试。',
+    headline: '同步导出改成入队后立刻返回任务号、前端轮询取结果，重试按 1s / 4s / 16s 退避走三次。',
+    // 要点必须是 `{ text, depth }` 对象：v1 卡按 `item.text` 渲染、按 `item.depth` 缩进，
+    // 传字符串会渲出三个空圆点（截图里一眼看得见，字符串形参则静默）。
+    bullets: [
+      { depth: 0, text: '入队后立刻返回任务号，前端改成 2 秒轮询' },
+      { depth: 0, text: '失败重试按指数退避，超过三次标记为失败' },
+      { depth: 1, text: '超时上限 10 分钟，超时后释放占用的并发位' },
+    ],
+    asks: ['并发上限沿用现在的 4，还是提到 8？', '旧的同步接口要不要留一个版本兼容？'],
+    toolCalls: 12,
+    answerChars: 1063,
+  };
+  for (const [id, open] of [
+    ['closed', false],
+    ['open', true],
+  ]) {
+    const card = await render(open, demo);
+    fs.writeFileSync(path.join(shotsDir, `demo-brief-${id}-light.html`), pageOf(`demo-brief-${id}-light`, card, scopeLines[0], ''), 'utf8');
+    written.push(`demo-brief-${id}-light（演示卡）`);
+  }
+}
+console.log(`写出 ${written.length} 个 v1 页面到 .tmp/shots/：${written.join('、')}`);
 console.log(`用的那一张卡：第 ${brief.turn} 轮，要点 ${brief.bullets.length} 条、待你拍板 ${brief.asks.length} 条、提问 ${brief.prompt === '' ? '（无）' : '有'}`);
 console.log(`结论：${brief.headline}`);

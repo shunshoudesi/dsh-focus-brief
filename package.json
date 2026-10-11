@@ -1,12 +1,42 @@
 {
-  "name": "@local/dsh-focus-brief",
+  "name": "dsh-focus-brief",
   "version": "0.3.0",
-  "private": true,
-  "description": "一个「专注」会话视图：每轮一张结果卡（回答气泡 + 信息块 + 可展开的回答全文），外加普通对话视图里的折叠重点卡片；卡片骨架由本地写死的回答格式契约规定，内容由模型按同一份契约填。",
+  "description": "把 agent 每轮的回答压成一张结果卡：一句结论 + 默认收起的信息块（需要你确认 / 关键数据 / 产出文件 / 结论建议 / 风险提醒）。块的骨架写死在本地，内容由模型按同一份回答格式契约填，不额外调用模型。",
   "type": "module",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shunshoudesi/dsh-focus-brief.git"
+  },
+  "homepage": "https://github.com/shunshoudesi/dsh-focus-brief#readme",
+  "bugs": {
+    "url": "https://github.com/shunshoudesi/dsh-focus-brief/issues"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "focus-view",
+    "chat-ui",
+    "agent-answer"
+  ],
+  "main": "index.js",
   "exports": {
     ".": "./index.js",
-    "./client": "./client.js"
+    "./client": "./client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "README.md",
+    "MANUAL.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20.18"
   },
   "meta": {
     "title": "专注视图 Focus View",
@@ -23,6 +53,17 @@
         "@deepseek-ai/dsh-client-ui-chat",
         "@deepseek-ai/dsh-client-ui-conversation"
       ]
+    },
+    "compatibility": {
+      "dsh": ">=0.2.0-rc.2 <0.3.0",
+      "node": ">=20.18",
+      "profiles": [
+        "web",
+        "desktop"
+      ],
+      "dshReleases": {
+        "0.2.0-rc.2": "compatible"
+      }
     }
   }
 }
