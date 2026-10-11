@@ -12,28 +12,30 @@
 
 - [x] 公开仓库：<https://github.com/shunshoudesi/dsh-focus-brief>
 - [x] 插件导出 `apply(ctx)` 模块（`index.js` 的 `export function apply(ctx)`）
-- [x] README 含安装命令（`dsh plugin --profile web add github:shunshoudesi/dsh-focus-brief`，且落在前 1200 字符内）
+- [x] README 含安装命令（`dsh plugin --profile web add dsh-focus-brief`，且落在前 1200 字符内）
 - [x] 仓库描述（一句话价值，插件市场卡片直接显示它）
 - [x] GitHub topic：`dsh-plugin`（另加 `deepseek-harness`、`dsh`、`focus-view`）——已实测被市场的同款查询命中
 - [x] 许可证：Apache-2.0（`LICENSE` + `package.json` 的 `license`）
-- [x] **只从 GitHub 源码发布**（`dsh plugin add github:...`，已实测可用）；npm registry 不发
+- [x] npm 包 `dsh-focus-brief@0.3.0` 已发布（**一键安装的前提**；验收命令见下）
+- [x] 另一条路也通：`dsh plugin --profile web add github:shunshoudesi/dsh-focus-brief`（已实测）
 - [ ] 收录后把 README「收录」一节里的徽章链接换成正式详情页地址
 
-### 当前形态：只上 GitHub，不占 npm
+### 发布形态：npm 与 GitHub 两条都通
 
-插件市场的一键安装写死了 `dsh plugin --profile web add <仓库名>`，也就是**必须有同名 npm 包**。
-本仓库选择不发 npm，代价与对策：
+插件市场的一键安装固定拼 `dsh plugin --profile web add <仓库名>`，也就是**必须有同名 npm 包**。
+两条路现在都能装，且都实测过：
 
-- 市场里**能搜到、能看 README**（topic 起效），但详情面板里那行一键安装会报「取不到包」；
-- 对策就是 README 顶部那条 `dsh plugin --profile web add github:shunshoudesi/dsh-focus-brief`——
-  这条已经实测过：pnpm 能取到 `dsh-focus-brief@0.3.0`，且 `files` 白名单生效（只装 7 个文件）。
+```bash
+dsh plugin --profile web add dsh-focus-brief                             # npm，市场一键安装用的就是这条
+dsh plugin --profile web add github:shunshoudesi/dsh-focus-brief         # 源码直装，绕过 registry
+```
 
-### （可选）发布 npm 包，换回一键安装
+### 发布 / 升级 npm 包
 
 ```bash
 cd <本仓库根>
 npm login                 # 浏览器授权，只需一次
-npm publish               # 0.3.0；72h 内可 unpublish，之后不可撤回
+npm publish               # 0.3.0 已于 2026-10-11 发布；下次先改 package.json 的 version
 ```
 
 验收（这条命令要能返回含 `dsh.bundle.patch` 的 JSON，市场据此判定「标准 bundle 插件」）：
@@ -42,6 +44,8 @@ npm publish               # 0.3.0；72h 内可 unpublish，之后不可撤回
 npm view dsh-focus-brief version
 curl -s https://registry.npmjs.org/dsh-focus-brief/latest | findstr dsh
 ```
+
+> 发布在 72 小时内可以 `npm unpublish`，之后不可撤回；同名同版本 24 小时内不能重发。改版本号再发是常规做法。
 
 ## 提交模板（可直接粘贴）
 
