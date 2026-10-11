@@ -13,6 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { readSessionEvents } from './zstd-frames.mjs';
 import { PREVIEW, REACT_DIR as dir, themeSource } from './_paths.mjs';
+import { SECTION_NAMES } from '../index.js';
 function loadUmd(file, requireFn) {
   const code = fs.readFileSync(file, 'utf8');
   const module = { exports: {} };
@@ -54,14 +55,14 @@ for (const file of files) {
 
 const has = (predicate) => pool.filter(predicate);
 /**
- * 取最后一轮，但**优先挑真的带原始记录的那种**：
- * 投影只给最近 8 轮带原文，挑到旧轮次的话，预览里第 ③ 格就只能显示「这轮较早，只保留提炼结果」——
- * 那等于用空壳演示一个功能。第一次生成时就是这个毛病。
+ * 取最后一轮，但**优先挑真的带「回答全文」的那种**：
+ * 投影只给最近 8 轮带全文，挑到旧轮次的话，预览里第 ③ 格就只能显示「这轮较早，只保留提炼结果」——
+ * 那等于用空壳演示一个功能。
  */
 const firstOf = (list) => {
   if (list.length === 0) return null;
-  const withRaw = list.filter((turn) => turn.rawOmitted !== true && (turn.raw?.length ?? 0) > 0);
-  return (withRaw.length > 0 ? withRaw : list).at(-1);
+  const withFull = list.filter((turn) => typeof turn.full === 'string' && turn.full !== '');
+  return (withFull.length > 0 ? withFull : list).at(-1);
 };
 const pickedTurns = [
   // 信息块最多的一轮：只有 >2 块才会叠成一摞，所以必须专门挑一轮来演示叠压。
@@ -310,6 +311,18 @@ const out = PREVIEW;
 fs.writeFileSync(out, html, 'utf8');
 const kb = Math.round(fs.statSync(out).size / 1024);
 console.log(`写出 ${out}：${kb} KB，${picked.length} 轮 × 3 种状态，CSS ${injected.length} 字符`);
-console.log(`轮次：${picked.map((turn) => `${turn.session.slice(-8)}#${turn.turn}(${turn.state}${turn.decisions > 0 ? `,待你定${turn.decisions}` : ''},块${turn.blocks.length})`).join(' ')}`);
+// 轮次里带上「这轮有没有写契约段」——履历里绝大部分轮次是契约之前写的，
+// 不打这个标记的话，看到「块 0」会以为是解析器坏了。
+const contractMark = (turn) => {
+  const raw = turn.full === '' ? '' : turn.full;
+  const hit = SECTION_NAMES.filter((name) => new RegExp(`^#{1,6}\\s*${name}\\s*$`, 'm').test(raw));
+  return hit.length === 0 ? '' : `,契约${hit.length}段`;
+};
+const anyContractMark = (turn) => {
+  // 最近 8 轮的全文在 wire 里；更早的轮次没有全文，用「块里有没有 points/risks」间接判断。
+  if (turn.full !== '') return contractMark(turn);
+  return turn.blocks.some((block) => block.id === 'points' || block.id === 'risks') ? ',契约段' : '';
+};
+console.log(`轮次：${picked.map((turn) => `${turn.session.slice(-8)}#${turn.turn}(${turn.state}${turn.decisions > 0 ? `,待你定${turn.decisions}` : ''},块${turn.blocks.length}${anyContractMark(turn)})`).join(' ')}`);
 console.log(`缺少的字典键：${[...new Set((html.match(/MISSING:[a-z.]+/g) ?? []))].join(' ') || '无'}`);
 console.log(`两套主题都有 token：浅 ${scopes[0].length} 字符 / 深 ${scopes[1].length} 字符`);

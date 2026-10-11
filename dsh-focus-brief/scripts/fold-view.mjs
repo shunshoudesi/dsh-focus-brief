@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { readSessionEvents } from './zstd-frames.mjs';
-import { apply } from '../index.js';
+import { apply, SECTION_NAMES } from '../index.js';
 
 const dumped = process.argv[2] === '--dump' ? Number(process.argv[3]) : null;
 /** --samples N：把每种信息块抽 N 条真实样例打出来，用来判断抽取规则有没有在制造噪音。 */
@@ -110,6 +110,22 @@ let crossBlockDup = 0;
 /** 闸门：工具说明里不该夹着工具标记语言；工具名不该还是原始 snake_case。 */
 let markupNotes = 0;
 let rawLabels = 0;
+/**
+ * 契约遵守度：这几条量的是**接口有没有被模型按规格写**。
+ * 它们是「契约是接口」这件事的唯一观测面——模型不按规格写，块就会消失，而卡片不会报错。
+ */
+let contractSections = new Map();
+let withContractSection = 0;
+/**
+ * 段名写得不精确的标题（`## 需要你确认（3 条）`、`## 三个需要你确认的点`）——契约要求一字不差。
+ * 这类标题**不算段头**，整段内容会落回正文，卡片上少一个块。
+ * 为什么只报告、不当硬闸门：语料里真有两个这种标题，而它们都是**内容标题**
+ * （「三、还剩一件事需要你确认（我查不到）」），按精确规则处理正是对的。
+ * 数量涨了就该拿出来看一眼——所以连原样一起打出来。
+ */
+const malformedHeads = [];
+/** 同一个段名写了两遍（第二遍连同内容一起被丢掉，但值得知道模型在重复写）。 */
+let repeatedSections = 0;
 /**
  * 闸门：关键数据的两条不变量（故意照抄宿主那两条规则——它们正是把噪音挡在外面的东西，
  * 放宽列数时全靠它们，所以值得单独钉住）。
@@ -251,6 +267,37 @@ for (const file of files) {
     }
     if (turn.prompt === '') emptyPrompt++;
     if ((turn.promptMedia ?? 0) > 0) mediaPrompts++;
+    // 契约遵守度：直接从**这一轮的原文**里数段头（原文在 state 里，wire 里那份全文只有最近 8 轮）。
+    {
+      const raw = state.turns[index]?.answer ?? '';
+      const seen = new Set();
+      let hitAny = false;
+      let fenced = false;
+      for (const rawLine of raw.split('\n')) {
+        const line = rawLine.trim();
+        if (/^`{3,}/.test(line)) {
+          fenced = !fenced;
+          continue;
+        }
+        if (fenced) continue;
+        const heading = /^(#{1,6})\s+(.+)$/.exec(line);
+        const bold = heading === null ? /^\*\*([^*]+)\*\*[：:]?$/.exec(line) : null;
+        const text = (heading === null ? bold?.[1] : heading[2])?.trim();
+        if (text === undefined) continue;
+        const exact = SECTION_NAMES.find((name) => text === name);
+        if (exact !== undefined) {
+          if (seen.has(exact)) repeatedSections++;
+          seen.add(exact);
+          hitAny = true;
+          contractSections.set(exact, (contractSections.get(exact) ?? 0) + 1);
+          continue;
+        }
+        // 名字包含但不等：契约要求一字不差，这类标题不算段头（内容会落回正文）。
+        const loose = SECTION_NAMES.find((name) => text.includes(name));
+        if (loose !== undefined && malformedHeads.length < 8) malformedHeads.push(text);
+      }
+      if (hitAny) withContractSection++;
+    }
     states.set(turn.state, (states.get(turn.state) ?? 0) + 1);
     for (const block of turn.blocks) blocks.set(block.id, (blocks.get(block.id) ?? 0) + 1);
     if (turn.title !== '') titleFromContract++;
@@ -275,6 +322,11 @@ console.log(
   `块数分布: ${[...blockHist.entries()].sort((a, b) => a[0] - b[0]).map(([count, n]) => `${count}块=${n}轮`).join('  ')}（>2 块才叠成一摞，其余直接铺开）`,
 );
 console.log(`提问为空的轮次 ${emptyPrompt} 轮｜其中「只有附件、没有文字」的 ${mediaPrompts} 轮（客户端画占位标记）`);
+console.log(
+  `契约遵守度：${withContractSection} / ${turns} 轮至少写了一个契约段（${[...contractSections.entries()].sort((a, b) => b[1] - a[1]).map(([name, count]) => `${name}=${count}`).join('  ') || '一个都没有'}）`,
+);
+console.log(`段名写得不精确的标题 ${malformedHeads.length} 处｜同名段写了两遍的 ${repeatedSections} 处（契约要求一字不差、每段一次）`);
+for (const text of malformedHeads) console.log(`  · 段名不精确的标题：${JSON.stringify(text)}（不算段头，内容落回正文）`);
 console.log(`有契约标题的轮次 ${titleFromContract} / ${turns}（拿不到就显示「第 N 轮」——提问已经原样摆在卡片上方，不再从提问抽标题）｜有正文但结论行抽不出 ${headlineEmpty} 轮`);
 console.log(`总卡标题与提问重复的轮次 ${titleDup} 轮（回归闸门：应为 0——提问已经单独摆出来了）`);
 console.log(`关键数据块 ${kpiTurns} 轮 | 风险块 ${riskTurns} 轮 | 产出文件块 ${fileTurns} 轮 | 提问以问号结尾 ${questions} 轮`);
@@ -317,6 +369,17 @@ for (const offender of offenders) {
   for (const text of offender.items) console.log(`      ${text === offender.headline ? '>>' : '  '} ${text.slice(0, 70)}`);
 }
 console.log(`wire.view 抛错 ${crashed} 次`);
+
+/**
+ * 闸门：段名清单本身没漂移。
+ * 契约文本、解析器、这个脚本三边读的是同一份 `SECTION_NAMES`——这里再确认一遍它没被改小/改空，
+ * 否则「契约遵守度」那几行会悄悄退化成「一个都没命中」。
+ */
+const missingNames = SECTION_NAMES.filter((name) => typeof name !== 'string' || name === '');
+if (SECTION_NAMES.length !== 4 || missingNames.length > 0) {
+  console.log(`!! 契约段名清单异常：${JSON.stringify(SECTION_NAMES)}`);
+  process.exit(1);
+}
 
 if (sampleMode !== null) {
   for (const [id, pool] of Object.entries(blockSamples)) {

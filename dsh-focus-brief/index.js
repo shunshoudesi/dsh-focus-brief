@@ -7,10 +7,12 @@
  *    「你问的 / 结论 / 要点 / 需要你确认 / 过程计数」，给普通对话视图里那张小卡片用。
  *
  * 2. 注册 `focusView` 投影（v2 专注视图）：把同一份日志折成“每轮一张完整结果卡”需要的原料——
- *    状态、标题、一句结论、产出文件、关键数据、结论建议、风险提醒，
- *    外加一份点开才看的原始记录（你的提问 + 每条助手文字 + 每次工具调用 + 报错）。
+ *    状态、标题、一句结论、产出文件、关键数据、结论建议、风险提醒。
+ *    结论与那些块**不是猜出来的**：本地有一份骨架规格（契约段名），模型按同一份规格写回答，
+ *    解析器照规格切段取内容（`splitAnswer` / `conclusionOf` / `*FromSection`）。
  *
- * 3. 通过 `ctx.systemPrompt.section()` 追加回答格式约定（固定标题行 + 结论先行 + 不粘日志）。
+ * 3. 通过 `ctx.systemPrompt.section()` 下发那份骨架规格（标题行 + 第一段结论 + 四个固定段名）。
+ *    契约是接口，本地是解析器——不额外发模型请求，规格就写在模型本来要产出的那条回答里。
  *
  * 两条折叠都只读已提交的事件，不写任何新事件，因此不会污染会话记录。
  *
@@ -33,16 +35,10 @@ const PROMPT_LIMIT = 300;
 
 /** 提炼结果的逐项上限。 */
 const HEADLINE_LIMIT = 200;
-/** 结论行的最小长度：比这还短的段落基本都是“整理完了。”这类状态句，不值得占第一行。 */
-const MIN_HEADLINE = 12;
 const BULLET_LIMIT = 100;
 const MAX_BULLETS = 10;
-const MAX_FALLBACK_POINTS = 6;
 const MAX_ASKS = 4;
 const MAX_DEPTH = 3;
-
-/** 模型自己标出「要你拍板」的小标题。实测真实回答里常见：需要你确认 / 需要你拍板的 / 请你回答这五个问题。 */
-const DECISION_HEADING = /需要你|请你|由你|需要(确认|拍板|定)/;
 
 /**
  * 极简 schema：注册表只用到 `.parse()`。
@@ -73,12 +69,6 @@ function plain(text) {
     .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
     .replace(/^\s*>\s?/, '')
     .trim();
-}
-
-/** 这一段是不是“只有一行小标题”。小标题是标题，不是结论。 */
-function isHeadingOnly(part) {
-  const trimmed = part.trim();
-  return /^#{1,6}\s+\S/.test(trimmed) && !trimmed.includes('\n');
 }
 
 /**
@@ -125,56 +115,134 @@ function contentText(content, limit) {
   return text;
 }
 
+/* ==================================================================== */
+/* 回答格式契约 · 骨架（本地写死）与解析器（本地确定性）                    */
+/* ==================================================================== */
+
 /**
- * 结论：优先取第一个“够长”的非标题段落，压成一行。
- * 实测 177 个真实轮次里，开头最常见的是 `## 本轮进展` 这种标题，其次就是
- * “整理完了。”这类 5 个字符的状态句——两个都不该占结论行，所以要跳过。
- * 全都够短时退回第一个正文段落，再退回第一个标题，保证这行不空着。
+ * 契约规定的四个段名，**一字不差**。骨架定义在本地（这里），内容由模型填。
+ *
+ * 为什么名字要钉死、而不是像以前那样按关键词去猜「这段算不算风险段」：
+ * 在 15 个会话 / 370 条真实回答上数过（`.tmp/section-census.mjs`）——
+ * 82% 的回答有小标题，但标题文本极度自由（「一句话回答你」18 次、「验证」15 次、「验收」8 次…），
+ * 按关键词归类最多命中 29%（结论），风险段只命中 7%，而且那 7% 里混着解释性文字。
+ * 换句话说：**模型自己写的段名太散，散到本地不可能猜准**；把名字写进契约之后，
+ * 本地才有一个可靠的接口可以读——「契约是接口，本地是解析器」就是这个意思。
+ *
+ * 同时**导出**出去：闸门脚本要拿同一份清单来数「契约遵守度」，
+ * 复制一份到脚本里就等于又多了一套会漂移的规则。
  */
-function headlineOf(text) {
-  let firstProse = '';
-  let firstHeading = '';
-  let fallback = '';
-  for (const part of text.split(/\n{2,}/)) {
-    const trimmed = part.trim();
-    if (trimmed === '') continue;
-    // 结构线（围栏、分隔线）不是「结论」：拿它当总卡那一行会非常难看。
-    if (isMarkdownNoise(trimmed.split('\n')[0].trim())) continue;
-    // markdown 表格也不是结论。截图里亲眼见过：一轮的结论行被压成了
-    // `| 检查 | 结果 | |---|---|---| 三块笔记数与旧库逐块对比 | 28 / 32 / 31 —— 完全一致 | …`，
-    // 表格线、分隔行、竖线全挤在一行里，读的人只能跳过它。
-    if (trimmed.startsWith('|')) continue;
-    const line = plain(trimmed);
-    if (line === '') continue;
-    // 整个段落就是一条列表时，结论取**第一条**列表项，而不是把整张列表压平：
-    // 读一遍真实语料时看到过 `- 契约是 OpenAI 定的… - 实现是一堆… - …` 这种压平结果，
-    // 三个要点挤在一行、后面还被截断，谁也没法读。
-    const firstLine = trimmed.split('\n')[0].trim();
-    const bullet = /^(?:[-*+]|\d+[.)])\s+(.+)$/.exec(firstLine);
-    const candidate = bullet === null ? line : plain(bullet[1]);
-    if (candidate === '') continue;
-    if (fallback === '') fallback = candidate;
-    if (isHeadingOnly(part)) {
-      if (firstHeading === '') firstHeading = line;
-      continue;
-    }
-    if (firstProse === '') firstProse = candidate;
-    if (candidate.length >= MIN_HEADLINE) return clip(candidate, HEADLINE_LIMIT);
-  }
-  if (firstProse !== '') return clip(firstProse, HEADLINE_LIMIT);
-  if (firstHeading !== '') return clip(firstHeading, HEADLINE_LIMIT);
-  return fallback === '' ? '' : clip(fallback, HEADLINE_LIMIT);
+export const SECTION_NAMES = ['需要你确认', '风险提醒', '关键数据', '结论建议'];
+
+/** 契约段起点：整行就是 `## 需要你确认` 或 `**需要你确认**`（名字必须全等，多一个字就不算）。 */
+const SECTION_LINE = /^(?:#{1,6}\s*|\*\*)([^*#\n]+?)(?:\*\*|)\s*[：:]?$/;
+
+/** 从一行里认出契约段名；不是契约段就返回 ''。 */
+function sectionNameOf(line) {
+  const match = SECTION_LINE.exec(line.trim());
+  if (match === null) return '';
+  const name = match[1].trim().replace(/[。：:]+$/, '');
+  return SECTION_NAMES.includes(name) ? name : '';
 }
 
 /**
- * 要点：小标题建层级，列表项挂在当前小标题下面，缩进再叠一层。
- * 这样出来的才是真的树，而不是标题和列表项混在同一层。
+ * 把整条回答切成「结论 + 若干契约段」。**这是解析器，不是提炼器**：
+ * 它只认契约规定的段名，其余内容一律算正文，不再用关键词去猜哪段像风险、哪行像要点。
+ *
+ * 三种真实形态都要认（语料里都出现过）：
+ * - `## 需要你确认`：标题形态（契约规定的主形态）；
+ * - `**需要你确认**`：整行加粗形态（模型爱用，2 遍普查里都有）；
+ * - `## 需要你确认（3 条）`：名字后面多写了字——**这不是合法段头**（契约要求一字不多），
+ *   所以它不算段起点，会留在正文里；`fold-view.mjs` 有一条闸门专门数这种「走形的段头」，
+ *   用来验证契约有没有被模型遵守。
+ *
+ * 段头在代码围栏里一律不算（回答里真出现过贴契约自身的围栏块）。
+ */
+function splitAnswer(text) {
+  const lines = text.split('\n');
+  const sections = new Map();
+  const conclusion = [];
+  /** 每一行属于哪一段（-1 = 结论段，其余 = 出现次序）。关键数据要靠它判断「表格在不在契约段里」。 */
+  const ownership = [];
+  let current = conclusion;
+  let currentIndex = -1;
+  let fenced = false;
+  // 契约说好每段只写一次。真出现第二次时，**它连同下面的内容一起不要**（不是并进第一段）：
+  // 并进去就等于在块的边界上留了一个说不清的缺口——那正是「解析器」不该做的事。
+  let skipping = false;
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (/^`{3,}/.test(line)) {
+      fenced = !fenced;
+      if (!skipping) current.push(raw);
+      ownership.push(skipping ? -2 : currentIndex);
+      continue;
+    }
+    if (!fenced) {
+      const name = sectionNameOf(line);
+      if (name !== '') {
+        if (sections.has(name)) {
+          skipping = true;
+          ownership.push(-2);
+          continue;
+        }
+        skipping = false;
+        current = [];
+        currentIndex = sections.size;
+        sections.set(name, current);
+        ownership.push(-2);
+        continue;
+      }
+    }
+    if (!skipping) current.push(raw);
+    ownership.push(skipping ? -2 : currentIndex);
+  }
+  return {
+    conclusion: conclusion.join('\n').trim(),
+    section: (name) => (sections.get(name) ?? []).join('\n').trim(),
+    /** 这个段名出现的位置（-1 = 整轮没这个段）；关键数据要靠它判「表格在不在契约段里」。 */
+    sectionIndex: (name) => (sections.has(name) ? [...sections.keys()].indexOf(name) : -1),
+    /** 第 N 行（trim 过）属于哪个契约段（-1 = 结论段，-2 = 段头行或被跳过的重复段）。 */
+    ownerOf: (index) => ownership[index] ?? -1,
+  };
+}
+
+/**
+ * 结论行：契约第一段（正文里那个「直接给答案」的段落）。
+ *
+ * 它只做三件事，都是被真实语料与截图教出来的：
+ * 1. 跳过 markdown 结构线。读真实语料时亲眼见过结论行被压成
+ *    `| 检查 | 结果 | |---|---|---| 三块笔记数与旧库逐块对比 | 28 / 32 / 31 —— 完全一致 | …`，
+ *    表格线、分隔行、竖线全挤进卡片第一行——所以表格行也不算；
+ * 2. 段落只有一行列表时取第一条列表项，而不是把整张列表压平（`- a - b - c` 谁也没法读）；
+ * 3. **小标题不算结论**。契约要求第一段就是答案，这段里冒出来的 `## 本轮进展` 是排版，
+ *    不是结论；真的整篇只有标题没有正文时，这一行宁可空着（客户端显示「（这轮没写结论）」），
+ *    也不拿一个标题冒充。
+ */
+function conclusionOf(text) {
+  for (const part of text.split(/\n{2,}/)) {
+    const trimmed = part.trim();
+    if (trimmed === '') continue;
+    const firstLine = trimmed.split('\n')[0].trim();
+    if (isMarkdownNoise(firstLine)) continue;
+    if (trimmed.startsWith('|') || firstLine.startsWith('|')) continue;
+    if (/^#{1,6}\s+\S/.test(firstLine)) continue;
+    const bullet = /^(?:[-*+]|\d+[.)])\s+(.+)$/.exec(firstLine);
+    const candidate = plain(bullet === null ? trimmed : bullet[1]).replace(/\s+/g, ' ');
+    if (candidate !== '' && hasWordChar(candidate)) return clip(candidate, HEADLINE_LIMIT);
+  }
+  return '';
+}
+
+/**
+ * 一段契约正文 → 条目骨架。小标题建层级，列表项挂在它下面，缩进再叠一层。
+ * 契约规定「段内可以用小标题和列表」，所以这里仍然要建树，而且**除了四个契约段名之外的小标题都算层级**
+ * （`## 验证` 这种是内容，不是段）。
  */
 function bulletsOf(text) {
   const out = [];
   const lines = text.split('\n');
-  // 因为 markdown 回答普遍用 `##` 当顶层标题，直接用井号个数当层级会白白多缩进一层。
-  // 先找出这篇回答里最浅的小标题，把它当第 0 层。
+  // 小标题普遍用 `##` 当顶层，直接用井号个数当层级会白白多缩进一层；先找出最浅的那层当第 0 层。
   let shallowest = 7;
   for (const raw of lines) {
     const heading = /^(#{1,6})\s+\S/.exec(raw.trim());
@@ -185,7 +253,6 @@ function bulletsOf(text) {
   for (const raw of lines) {
     const indent = raw.length - raw.trimStart().length;
     const line = raw.trim();
-    // 结构线（围栏、分隔线、表格分隔行）不参与建树：`- ` 之类的前缀判定本来就挡不住 `---`。
     if (isMarkdownNoise(line)) continue;
     const heading = /^(#{1,6})\s+(.+)$/.exec(line);
     if (heading !== null) {
@@ -207,101 +274,157 @@ function bulletsOf(text) {
     out.push({ depth: Math.min(MAX_DEPTH, depth), text: item });
     if (out.length >= MAX_BULLETS) break;
   }
-  return out.length > 0 ? out : paragraphPoints(text);
+  return out;
 }
 
 /**
- * 兜底骨架：整段纯文字、既没有列表也没有小标题时，用每一段的第一句当要点。
- * 实测 177 个真实轮次里有 14% 属于这一类，而这正是“单调的文字”最劝退的地方。
- *
- * 两处被真实语料教出来的取舍：
- * - 表格行与代码块开头的段落不算要点：否则整张 markdown 表格会被压成一条长得离谱的“要点”。
- * - 太短的第一句（“这是个很重要的认知纠正。”这类开场白）先让位给下一个够长的段落，
- *   全都够短时才退回它们，保证这行不空着。
+ * 某个契约段 → 条目列表。
+ * - 有列表就按列表建骨架（`**需要你确认**` 那种整行加粗的段头已经在分段时被吃掉了）；
+ * - 整段是纯文字（没有列表）时，**契约规定「每条一行」**，所以按行取——一行一条，
+ *   这比 v1 那套「按句号切、按段压平」准得多，也不会把一段话压成一行。
+ * - 只认契约段名之外的**小标题**若出现在段里：那是内容，当条目收下（`head` 标记）。
  */
-function paragraphPoints(text) {
+function itemsOf(text, shape) {
   const out = [];
-  const short = [];
-  for (const part of text.split(/\n{2,}/)) {
-    if (isHeadingOnly(part)) continue;
-    const first = part.trim().split('\n')[0].trim();
-    if (first.startsWith('|') || isMarkdownNoise(first)) continue;
-    const line = plain(part).replace(/\s+/g, ' ');
-    if (line === '') continue;
-    const match = /^[^。！？!?；;]*[。！？!?；;]/.exec(line);
-    const item = clip(match === null ? line : match[0], BULLET_LIMIT);
-    if (item === '') continue;
-    if (out.some((entry) => entry.text === item) || short.some((entry) => entry.text === item)) continue;
-    if (item.length < MIN_HEADLINE) {
-      short.push({ depth: 0, text: item });
+  const push = (value, head) => {
+    const item = clip(shape.plainBody ? plain(value) : unwrapQuotes(plain(value)), shape.limit);
+    if (item === '' || !hasWordChar(item) || item.length < shape.min) return;
+    if (out.some((entry) => entry.text === item)) return;
+    out.push(head ? { depth: 0, text: item, head: true } : { depth: 0, text: item });
+  };
+  const bullets = bulletsOf(text);
+  if (bullets.length > 0) {
+    for (const item of bullets) {
+      if (item.text.length < shape.min) continue;
+      if (out.some((entry) => entry.text === item.text)) continue;
+      out.push(item);
+      if (out.length >= shape.max) break;
+    }
+    return out;
+  }
+  for (const raw of text.split('\n')) {
+    if (out.length >= shape.max) break;
+    const line = raw.trim();
+    if (line === '' || isMarkdownNoise(line)) continue;
+    if (line.startsWith('|')) continue;
+    push(line.replace(/^(?:[-*+]|\d+[.)])\s+/, ''), false);
+  }
+  return out;
+}
+
+/**
+ * 结论建议：契约段里的骨架，去掉两类“占位置”的行——
+ * 1. 与卡片第一行那句结论重复的条目（同一句话不该在卡片里出现两次）；
+ * 2. 只有小标题、下面什么都没有的条目。
+ */
+function pointsFromSection(text, headline) {
+  const base = itemsOf(text, { max: MAX_BULLETS, limit: BULLET_LIMIT, min: 0, plainBody: true });
+  // 截断过的结论行末尾带「…」，直接比字符串会漏判，所以先抹掉尾部省略号与标点再比。
+  const norm = (value) => value.replace(/…+$/, '').replace(/[。！？!?；;，,、\s]+$/, '').trim();
+  const headlineKey = headline === '' ? '' : norm(headline);
+  const duplicate = (item) => {
+    if (headlineKey === '') return false;
+    const key = norm(item.text);
+    return key === headlineKey || headlineKey.startsWith(key) || key.startsWith(headlineKey);
+  };
+  return base.filter((item, index) => {
+    if (item.head === true) {
+      const next = base[index + 1];
+      if (next === undefined || next.depth <= item.depth) return false;
+    }
+    return !duplicate(item);
+  });
+}
+
+/**
+ * 风险提醒 / 需要你确认：契约段里的条目，各自有长度门槛。
+ * 风险条目太短（`**具体后果**` 这种伪小标题）不算内容；需要你确认则允许短句（「要不要提交？」）。
+ */
+function itemsFromSection(text, shape) {
+  return itemsOf(text, shape);
+}
+
+/**
+ * 关键数据的取数：只认「数字 + 可选单位」。
+ *
+ * 这条判据在 v1 是靠并排跑候选规则 + 打样例定下来的（`.tmp/kpi-variants.mjs`），
+ * 它正是把「内容表格 / 目录」挡在外面的东西，所以**契约换了接口、判据不变**。
+ *
+ * `ownerOf` + `allowed` 用来把取数范围钉在契约段内：`splitAnswer` 会给每一行标出归属，
+ * 只有归属落在允许的那几段里的行才算——所以同一篇里**段外**那张长得像表格的正文
+ * （对照表、目录）不会被顺手收进来。
+ * 少于两项就整块不显示（一个数字不值得占一个信息块）。
+ */
+function kpisIn(text, ownerOf, allowed) {
+  const out = [];
+  const lines = text.split('\n');
+  const ok = (index) => allowed === undefined || allowed.has(ownerOf(index));
+  const push = (key, value) => {
+    const k = plain(key).trim();
+    const v = clip(plain(value), KPI_VALUE_LIMIT);
+    if (k.length < 2 || k.length > KPI_KEY_LIMIT || KPI_KEY_JUNK.test(k)) return;
+    // 纯数字的“键”是表格的行标，不是指标名（实测漏进来过 `200 = ~0.99+`）；
+    // 但带点号的版本号要留（`0.3.6 = 54942` 是版本对比，那是真数据）。
+    if (/^[0-9]+$/.test(k)) return;
+    if (!KPI_VALUE.test(v)) return;
+    if (out.some((item) => item.k === k)) return;
+    out.push({ k, v });
+  };
+  for (const [index, raw] of lines.entries()) {
+    if (out.length >= KPI_MAX) break;
+    const line = raw.trim();
+    if (line === '' || line.startsWith('```') || !ok(index)) continue;
+    if (line.startsWith('|')) {
+      if (/^\|[\s:|-]+\|$/.test(line)) continue;
+      const cells = line
+        .split('|')
+        .map((cell) => cell.trim())
+        .filter((cell) => cell !== '');
+      if (cells.length < 2) continue;
+      // 表头行（`| 指标 | 值 |`）不可能是数据：值那一格不是数字，会被下面这一句挡掉。
+      const value = cells.slice(1).find((cell) => KPI_VALUE.test(clip(plain(cell), KPI_VALUE_LIMIT)));
+      if (value === undefined) continue;
+      push(cells[0], value);
       continue;
     }
-    out.push({ depth: 0, text: item });
-    if (out.length >= MAX_FALLBACK_POINTS) break;
+    const kv = /^[-*+]?\s*\*\*([^*]{2,16})\*\*[：:]\s*(.+)$/.exec(line);
+    if (kv !== null) push(kv[1], kv[2]);
   }
-  if (out.length > 0) return out;
-  return short.slice(0, MAX_FALLBACK_POINTS);
+  return out;
+}
+
+/**
+ * 关键数据的两种来源：**契约优先，本地兜底**。
+ *
+ * - 契约段在 → 只认那一段里的表。这是「内容由模型判」的正路：哪个数字值得上卡，模型说了算；
+ *   本地只负责按表格取数、按「数字 + 可选单位」过滤。范围靠行归属钉死，
+ *   所以段外那些长得像表格的正文（对照表、目录）不会被顺手收进来。
+ * - 契约段不在 → 扫整篇。这是给**契约之前的老轮次**的兼容，不是替代品：实测 208 轮语料里
+ *   有 14 轮带着货真价实的数字表（HNSW 参数、提交文件数、压测结果），而契约段一个都没有
+ *   （契约是这一版才下发的）。不放兜底，这些轮的数字会一起消失。
+ *
+ * 两路都要求至少两项，否则整块不显示。
+ */
+function kpisFrom(parsed, answer) {
+  const kpiIndex = parsed.sectionIndex('关键数据');
+  // 契约段在 → 只认归属等于那一段的行。段内另起一张表也算这一段（同一节里分两块写没问题），
+  // 但**别的段里的表格不算**——这一条有意识：模型把数字写在「结论建议」里，说明它的判断是
+  // 「那不是关键数据」，本地不该越权替它改判。段里不够两项就整块不显示（一个数字不值得占一块），
+  // 也不拿正文里的数字去凑。
+  if (kpiIndex !== -1) {
+    const fromSection = kpisIn(answer, parsed.ownerOf, new Set([kpiIndex]));
+    return fromSection.length >= 2 ? fromSection : [];
+  }
+  // 契约段不在 → 扫结论段（= 老轮次没写段头，数字就写在正文里）。
+  // 这是给契约之前那批历史轮次的兼容，不是替代品：实测 208 轮语料里有 14 轮带着货真价实的
+  // 数字表（HNSW 参数、提交文件数、压测结果），而契约段一个都没有（契约是这一版才下发的）。
+  const fallback = kpisIn(answer, parsed.ownerOf, new Set([-1]));
+  return fallback.length >= 2 ? fallback : [];
 }
 
 /** 去掉整条内容外面裹的一对引号，避免卡片里出现 `"…"` 这种残留。 */
 function unwrapQuotes(text) {
   return text.replace(/^["“”']|["“”']$/g, '').trim();
-}
-
-/**
- * 表格行取值：挑带问号的单元格，没有就挑最长的。
- * 否则整行 `| 1 | "…" | 设计权衡 |` 会被原样塞进卡片——实测这种回答不少。
- */
-function cellOf(line) {
-  if (!line.startsWith('|')) return line;
-  const cells = line
-    .split('|')
-    .map((cell) => cell.trim())
-    .filter((cell) => cell !== '' && !/^-{2,}$/.test(cell));
-  if (cells.length === 0) return line;
-  const withMark = cells.find((cell) => /[？?]/.test(cell));
-  if (withMark !== undefined) return withMark;
-  return cells.reduce((best, cell) => (cell.length > best.length ? cell : best), '');
-}
-
-/**
- * 需要你确认：两种来源合起来。
- *
- * 1. 模型自己用小标题划出的决策段（`## 需要你拍板的`、`## 请你回答这五个问题`）——段里的列表项和正文行都算。
- *    实测这比在正文里扫关键词准得多：扫「建议/推荐」会命中 28% 的轮次，但抽样一看全是解释性文字。
- * 2. 正文里带问号的句子——补上没被划进决策段的决策点。
- *
- * 小标题本身不入列（会和卡片上的「需要你确认」标题重复），只用来划定范围。
- */
-function asksOf(text) {
-  const out = [];
-  const push = (item) => {
-    if (item === '' || out.includes(item)) return;
-    out.push(item);
-  };
-  let decisionLevel = -1;
-  for (const raw of text.split('\n')) {
-    const line = raw.trim();
-    if (line === '') continue;
-    const heading = /^(#{1,6})\s+(.+)$/.exec(line);
-    if (heading !== null) {
-      const level = heading[1].length;
-      // 决策段内部的子标题不结束该段；同级或更高级的标题才结束。
-      if (decisionLevel !== -1 && level > decisionLevel) continue;
-      decisionLevel = DECISION_HEADING.test(heading[2]) ? level : -1;
-      continue;
-    }
-    const inDecision = decisionLevel !== -1;
-    const bullet = /^(?:[-*+]|\d+[.)])\s+(.+)$/.exec(line);
-    const source = cellOf(line);
-    if (bullet !== null) {
-      // 列表项只走决策段那条路：否则没带决策含义的问句列表项会和「要点」重复一遍。
-      if (inDecision) push(clip(unwrapQuotes(plain(bullet[1])), BULLET_LIMIT));
-    } else if (/[？?]/.test(line)) push(clip(unwrapQuotes(plain(source)), BULLET_LIMIT));
-    else if (inDecision) push(clip(unwrapQuotes(plain(source)), BULLET_LIMIT));
-    if (out.length >= MAX_ASKS) break;
-  }
-  return out;
 }
 
 /** 只保留最近 MAX_TURNS 轮。 */
@@ -316,8 +439,12 @@ function trim(entries) {
 /** 投影键；客户端用 `useProjection('focusBrief')` 读取，两边必须一致。 */
 const PROJECTION_KEY = 'focusBrief';
 
-/** 字段或折叠语义一变更就必须递增（注册表要求同键同版本才能共享单元）。 */
-const STATE_VERSION = 4;
+/**
+ * 字段或折叠语义一变更就必须递增（注册表要求同键同版本才能共享单元）。
+ * v5 = 小卡片也改读契约段（结论 = 第一段，要点 = 「结论建议」段，要你确认 = 「需要你确认」段），
+ * 不再跑 v1 自己那套「决策段 + 任何问号句」的启发式——两张卡从此共用同一个解析器。
+ */
+const STATE_VERSION = 5;
 
 /** 一整个轮次的原始折叠结果。 */
 function emptyTurn(turn, startSeq) {
@@ -387,13 +514,18 @@ function foldEvent(state, event) {
  * 只带提炼结果，不带完整正文——正文已由聊天界面渲染，重复携带会白白撑大推送帧。
  */
 function briefOf(entry, text, toolCalls) {
+  // v1 与专注视图共用同一个解析器（同一份契约规格）：结论 = 契约第一段，要点 = 「结论建议」段，
+  // 要你确认 = 「需要你确认」段。这里也要先剥掉契约标题行，否则标题会顶在结论位上。
+  const split = text === '' ? { title: '', text: '' } : splitTitleLine(text);
+  const answer = split.text === '' ? null : splitAnswer(split.text);
+  const headline = answer === null ? '' : conclusionOf(answer.conclusion);
   return {
     turn: entry.turn,
     startSeq: entry.startSeq,
     prompt: entry.prompt,
-    headline: headlineOf(text),
-    bullets: bulletsOf(text),
-    asks: asksOf(text),
+    headline,
+    bullets: answer === null ? [] : pointsFromSection(answer.section('结论建议'), headline),
+    asks: answer === null ? [] : itemsFromSection(answer.section('需要你确认'), { max: MAX_ASKS, limit: BULLET_LIMIT, min: 0, plainBody: false }).map(({ text: value }) => value),
     toolCalls,
     answerChars: text.length,
   };
@@ -428,9 +560,15 @@ const VIEW_KEY = 'focusView';
 /**
  * 折叠语义变更史（改了状态里存的东西就必须递增）：
  * v2 = 工具名美化（MCP）+ 产出文件过滤；v3 = 产出文件改存去重键 `key`（并改存完整路径）；
- * v4 = 工具名美化扩到 snake_case（存的是 label）+ 结果说明挡掉带标记语言的短结果。
+ * v4 = 工具名美化扩到 snake_case（存的是 label）+ 结果说明挡掉带标记语言的短结果；
+ * v5 = 去掉「执行过程」块（纯 wire 改动，递增只为让宿主落后能被检测到）；
+ * v6 = 新增 `promptMedia`（用户只发了附件、没有文字时记附件个数）；
+ * v7 = **契约解析器**：卡片原料从「本地关键词猜段」改成「按契约段名切段取内容」。
+ *      这一版 state 里存的东西其实没变（照旧是整条回答原文 + 事件），所以按规矩本不必递增；
+ *      递增的理由和 v5 一样：让 `verify-view.mjs` 能报出「宿主还在跑旧解析器」——
+ *      不递增的话它会一脸绿地说「逐字段一致」，而屏幕上老轮次的块少了一半。
  */
-const VIEW_STATE_VERSION = 6;
+const VIEW_STATE_VERSION = 7;
 
 /** 专注视图保留的轮次数（比 v1 少：每轮带的原料多得多）。 */
 const VIEW_TURN_LIMIT = 30;
@@ -451,9 +589,6 @@ const KPI_VALUE_LIMIT = 40;
 const RISK_MAX = 3;
 const RISK_ITEM_LIMIT = 120;
 const RISK_MIN_ITEM = 8;
-
-/** 风险小标题：只认模型自己划出的风险段，不在正文里扫关键词（扫关键词会命中大量解释性文字）。 */
-const RISK_HEADING = /风险|注意|警告|踩坑|副作用|局限|隐患|代价|失败/;
 
 /**
  * 「成功了」这类样板话。
@@ -673,169 +808,14 @@ function filesOfTool(name, args) {
 }
 
 /**
- * 关键数据：表格里**有一格真的是个数字**，或者 `**键**：值` 行。
- *
- * 这条规则被真实语料改过两次，两次都是靠并排跑候选规则 + 打样例决定的（`.tmp/kpi-variants.mjs`）：
- * 1. 第一版只要求「表格行 + 值里出现过数字」，抽出来的是 `1 · 止血 → 12:00 评分链路崩了`、
- *    `十、上下文预算 → Q29-Q34` —— 那是内容表格和目录。
- * 2. 收紧成「值必须匹配数字+可选单位」后命中掉到 2 轮；再拿掉「必须恰好两列」的限制，
- *    命中回到 11 轮，而样例全是真数据：`/fast c20 = 27585`、`ef_construction = 64`、
- *    `重复副本 = 54`、`0.3.6 = 54942`。**真正在过滤噪音的是值那条规则，不是列数。**
+ * 关键数据的判据（**契约换了接口，判据不变**）。
+ * 值只认「数字 + 可选单位」——这条规则在 v1 是靠并排跑候选规则 + 打样例定下来的
+ * （`.tmp/kpi-variants.mjs`）：只要求「表格行里出现过数字」时抽出来的是内容表格和目录
+ * （`1 · 止血 → 12:00 评分链路崩了`、`十、上下文预算 → Q29-Q34`）；收紧到值时才全是真数据。
  * 少于两项就整块不显示（一个数字不值得占一个信息块）。
  */
 const KPI_VALUE = /^[~～≈≥≤<>约共]?\s*[0-9][0-9,./:%+\-]*\s*(?:%|个|条|家|次|秒|分钟|分|小时|天|周|月|年|倍|万|亿|人|元|页|项|轮|步|点|字|MB|KB|GB|k|K|tokens|token)?$/;
 const KPI_KEY_JUNK = /[·、,，。:：|]/;
-
-function kpisOf(text) {
-  const out = [];
-  const push = (key, value) => {
-    const k = plain(key).trim();
-    const v = clip(plain(value), KPI_VALUE_LIMIT);
-    if (k.length < 2 || k.length > KPI_KEY_LIMIT || KPI_KEY_JUNK.test(k)) return;
-    // 纯数字的“键”是表格的行标，不是指标名：实测漏进来过 `200 = ~0.99+` 这种。
-    // 但带点号的版本号要留（`0.3.6 = 54942` 是版本对比，那是真数据）。
-    if (/^[0-9]+$/.test(k)) return;
-    if (!KPI_VALUE.test(v)) return;
-    if (out.some((item) => item.k === k)) return;
-    out.push({ k, v });
-  };
-  for (const raw of text.split('\n')) {
-    if (out.length >= KPI_MAX) break;
-    const line = raw.trim();
-    if (line === '' || line.startsWith('```')) continue;
-    if (line.startsWith('|')) {
-      if (/^\|[\s:|-]+\|$/.test(line)) continue;
-      const cells = line
-        .split('|')
-        .map((cell) => cell.trim())
-        .filter((cell) => cell !== '');
-      if (cells.length < 2) continue;
-      // 第一格当键，后面哪一格真的像个数字就用哪一格（行尾的说明文字不会被误取）。
-      const value = cells.slice(1).find((cell) => KPI_VALUE.test(clip(plain(cell), KPI_VALUE_LIMIT)));
-      if (value === undefined) continue;
-      push(cells[0], value);
-      continue;
-    }
-    const kv = /^[-*+]?\s*\*\*([^*]{2,16})\*\*\s*[：:]\s*(.+)$/.exec(line);
-    if (kv !== null) push(kv[1], kv[2]);
-  }
-  return out.length >= 2 ? out : [];
-}
-
-/**
- * 结论建议：拿 bulletsOf 的骨架，但去掉两类“占着位置没内容 / 已经在别处出现”的行：
- * 1. 小标题本身（「工具循环到底在谁手里」「一句话总结」）——除非它下面确实带着子项；
- * 2. 和总卡那句结论重复的条目（总卡第一行已经写了，再列一遍就是噪音）；
- * 3. **决策段与风险段里的内容**：那些已经有自己的块（「需要你确认」「风险提醒」），
- *    再抄进结论建议就是同屏重复。截图里刚看到过：一轮的结论建议把 4 条待确认原样重复了一遍。
- */
-function pointsOf(text, headline) {
-  const lines = text.split('\n');
-  const excluded = new Array(lines.length).fill(false);
-  let excludedLevel = -1;
-  for (let index = 0; index < lines.length; index++) {
-    const line = lines[index].trim();
-    const heading = /^(#{1,6})\s+(.+)$/.exec(line);
-    if (heading !== null) {
-      const level = heading[1].length;
-      // 被排除的段内部的子标题不结束该段；同级或更高级才结束。
-      if (excludedLevel !== -1 && level > excludedLevel) {
-        excluded[index] = true;
-        continue;
-      }
-      excludedLevel = DECISION_HEADING.test(heading[2]) || RISK_HEADING.test(heading[2]) ? level : -1;
-      excluded[index] = excludedLevel !== -1;
-      continue;
-    }
-    excluded[index] = excludedLevel !== -1;
-  }
-  const body = lines.map((line, index) => (excluded[index] ? '' : line)).join('\n');
-
-  const fromBullets = bulletsOf(body);
-  // 「真列表项」才算骨架：整篇只有小标题时，宁可退回“每段第一句”，因为小标题本身没有内容。
-  const hasReal = fromBullets.some((item) => item.head !== true);
-  const base = hasReal ? fromBullets : paragraphPoints(body);
-  // 截断过的结论行末尾带「…」，直接比字符串会漏判，所以先抹掉尾部省略号与标点再比。
-  const norm = (value) => value.replace(/…+$/, '').replace(/[。！？!?；;，,、\s]+$/, '').trim();
-  const headlineKey = headline === '' ? '' : norm(headline);
-  /** 和总卡那句结论重复的条目：两个方向都算（结论是这句的截断，或这句是结论的截断）。 */
-  const duplicate = (item) => {
-    if (headlineKey === '') return false;
-    const key = norm(item.text);
-    return key === headlineKey || headlineKey.startsWith(key) || key.startsWith(headlineKey);
-  };
-  return base.filter((item, index) => {
-    if (item.head === true) {
-      const next = base[index + 1];
-      if (next === undefined || next.depth <= item.depth) return false;
-    }
-    return !duplicate(item);
-  });
-}
-
-/**
- * 需要你确认（专注视图版）：只取模型自己用小标题划出的决策段，不再把正文里带问号的句子也算进来。
- *
- * v1 那张小卡用的是宽规则（决策段 + 任何问号句），实测命中 47% 的轮次，但抽样一看大半是
- * 反问句、代码片段（`? '查看结算'`）和对话里的台词。专注视图要求「说了要你确认，就真的有事要你确认」，
- * 所以这里收窄到决策段——收窄后状态「待确认」和信息块永远一致。
- */
-function decisionItemsOf(text) {
-  const out = [];
-  let level = -1;
-  for (const raw of text.split('\n')) {
-    if (out.length >= MAX_ASKS) break;
-    const line = raw.trim();
-    if (line === '') continue;
-    const heading = /^(#{1,6})\s+(.+)$/.exec(line);
-    if (heading !== null) {
-      const depth = heading[1].length;
-      if (level !== -1 && depth > level) continue;
-      level = DECISION_HEADING.test(heading[2]) ? depth : -1;
-      continue;
-    }
-    if (level === -1) continue;
-    if (isMarkdownNoise(line)) continue;
-    const bullet = /^(?:[-*+]|\d+[.)])\s+(.+)$/.exec(line);
-    const body = bullet !== null ? bullet[1] : cellOf(line);
-    const item = clip(unwrapQuotes(plain(body)), BULLET_LIMIT);
-    // `hasWordChar`：剥完标记只剩标点的条目直接丢（真被 `---` 和围栏的反引号坑过）。
-    if (item === '' || !hasWordChar(item) || out.includes(item)) continue;
-    out.push(item);
-  }
-  return out;
-}
-
-/**
- * 风险提醒：只取模型自己划出的风险小标题底下的条目。
- * 两个坑在真实语料里踩到过，都要挡：代码围栏行（````sql``）和 markdown 表格分隔行（`|---|---|`）；
- * 另外太短的条目（`**具体后果**` 这种伪小标题）也不算风险内容。
- * 这三条判断现在与「需要你确认」共用同一套（isMarkdownNoise / hasWordChar），免得两边规则漂移。
- */
-function risksOf(text) {
-  const out = [];
-  let level = -1;
-  for (const raw of text.split('\n')) {
-    if (out.length >= RISK_MAX) break;
-    const line = raw.trim();
-    if (line === '') continue;
-    const heading = /^(#{1,6})\s+(.+)$/.exec(line);
-    if (heading !== null) {
-      const depth = heading[1].length;
-      if (level !== -1 && depth > level) continue;
-      level = RISK_HEADING.test(heading[2]) ? depth : -1;
-      continue;
-    }
-    if (level === -1) continue;
-    if (isMarkdownNoise(line)) continue;
-    const bullet = /^(?:[-*+]|\d+[.)])\s+(.+)$/.exec(line);
-    const body = bullet !== null ? bullet[1] : cellOf(line);
-    const item = clip(unwrapQuotes(plain(body)), RISK_ITEM_LIMIT);
-    if (item.length < RISK_MIN_ITEM || !hasWordChar(item) || out.includes(item)) continue;
-    out.push(item);
-  }
-  return out;
-}
 
 /**
  * 从一条助手文字里剥出契约标题行。
@@ -1054,11 +1034,15 @@ function foldViewEvent(state, event) {
  */
 function viewTurnOf(entry, isLast, withFull) {
   const answer = entry.answer;
-  const headline = answer === '' ? '' : headlineOf(answer);
-  const points = answer === '' ? [] : pointsOf(answer, headline);
-  const kpis = answer === '' ? [] : kpisOf(answer);
-  const risks = answer === '' ? [] : risksOf(answer);
-  const asks = answer === '' ? [] : decisionItemsOf(answer);
+  // 一条回答先按契约切成「结论 + 四个契约段」，每一块只从它自己那一段里取内容。
+  // 这一步是整张卡的接口：**骨架在本地**（段名 + 各块的形状与上限），**内容由模型填**。
+  // 在此之前这里是四套关键词启发式（哪段像风险段、哪行像要点），在 370 条真实回答上最多命中 29%。
+  const parsed = answer === '' ? null : splitAnswer(answer);
+  const headline = parsed === null ? '' : conclusionOf(parsed.conclusion);
+  const points = parsed === null ? [] : pointsFromSection(parsed.section('结论建议'), headline);
+  const kpis = parsed === null ? [] : kpisFrom(parsed, answer);
+  const risks = parsed === null ? [] : itemsFromSection(parsed.section('风险提醒'), { max: RISK_MAX, limit: RISK_ITEM_LIMIT, min: RISK_MIN_ITEM, plainBody: false });
+  const asks = parsed === null ? [] : itemsFromSection(parsed.section('需要你确认'), { max: MAX_ASKS, limit: BULLET_LIMIT, min: 0, plainBody: false });
 
   // 状态：跑着 > 待你拍板 > 失败/中断 > 完成。没有 turn/end 但后面又开了一轮，说明这轮被打断了。
   // 「待确认」只留给**真的在等你**的情况（有一次没答复的审批）。回答里带「需要你确认」段不算——
@@ -1074,11 +1058,11 @@ function viewTurnOf(entry, isLast, withFull) {
   // 这张卡只放**回答本身**拆出来的东西：要你拍板的事、关键数据、产出文件、结论建议、风险提醒。
   // 执行日志（工具调用时间线）不进卡——那是官方「轨迹」视图的活，卡片里放它等于把答案淹掉。
   // 要你拍板的事排在最前面：这是唯一“看完必须动手”的块。
-  if (asks.length > 0) blocks.push({ id: 'asks', items: asks.map((text) => ({ text })) });
+  if (asks.length > 0) blocks.push({ id: 'asks', items: asks.map(({ text }) => ({ text })) });
   if (kpis.length > 0) blocks.push({ id: 'kpi', items: kpis });
   if (entry.files.length > 0) blocks.push({ id: 'files', items: entry.files });
   if (points.length > 0) blocks.push({ id: 'points', items: points });
-  if (risks.length > 0) blocks.push({ id: 'risks', items: risks.map((text) => ({ text })) });
+  if (risks.length > 0) blocks.push({ id: 'risks', items: risks.map(({ text }) => ({ text })) });
 
   return {
     turn: entry.turn,
@@ -1135,21 +1119,33 @@ const viewDefinition = {
 };
 
 /* ==================================================================== */
-/* 回答格式约定                                                          */
+/* 回答格式约定（骨架的一半，另一半是上面的解析器 SECTION_NAMES）           */
 /* ==================================================================== */
 
 /**
- * 提示词契约。两件事，都直接影响卡片能不能成形：
- * 固定标题行（本地剥掉当卡片标题，所以正文里不会留残留）+ 结论先行不粘日志。
- * 代价是每次请求多这段固定文本；它是稳定前缀，通常能命中 KV 缓存。
+ * 提示词契约 = **卡片骨架的规格书**。模块的骨架预先定死（本地），模块里的内容由模型判——
+ * 但不额外发一次模型请求：这一段写进模型本来就要产出的那条回答里，本地再按同一份规格解析。
+ *
+ * 三段结构，每一段都直接决定卡片上的一处：
+ * 1. `【本轮】…` 标题行 —— 本地剥掉，当卡片标题（正文里不留残留）；
+ * 2. 第一段 —— 直接给答案，本地拿它当卡片里那句结论；
+ * 3. `## 段名` —— 本地按**一字不差的段名**切块，同名段进同名块。
+ *
+ * 代价是每次请求多这段固定文本；它是稳定前缀，通常命中 KV 缓存。
+ * 措辞上有三处是刻意写死的，改任何一处都要同步改解析器：
+ * - 段名清单（`SECTION_NAMES`）；
+ * - 「一字不差」——`## 需要你确认（3 条）` 这种走形段头**不算**段，会留在正文里（有闸门在数）；
+ * - 「没有就整段省掉」——空段不许靠写「无」来凑，否则卡片会被空块撑满。
  */
 const CONTRACT_NAME = 'dsh-focus-brief:answer-format';
 const CONTRACT_ORDER = 9000;
 const CONTRACT_TEXT = [
   '回答格式约定（优先级高于风格偏好）：',
   '1. 第一行固定写成 `【本轮】不超过 20 字的标题`，只放标题，别在这一行写别的。',
-  '2. 第一段直接回答用户这次的问题本身：先给结论或答案，不要复述问题、不要铺垫背景，也不要用「已完成」「整理好了」这类状态句开头。',
-  '3. 正文只写结论与必要推理；不要整段粘工具输出、命令回显、日志或文件内容，要引用时只写结论与路径；要用户拍板的事单独列成「需要你确认」。',
+  '2. 第一段直接给答案：不复述问题、不铺垫背景，也不用「已完成」「整理好了」这类状态句开头。本地会拿这一段当卡片上那句结论。',
+  '3. 需要分类的内容写成固定小标题段，**段名必须一字不差**：`## 需要你确认`（要用户拍板的事，一条一行）、`## 风险提醒`、`## 关键数据`（一张 `| 指标 | 值 |` 表，值写数字）、`## 结论建议`。段内可以用小标题和列表。',
+  '4. 没有内容的段整段省掉，不要写「无」。',
+  '5. 正文只写结论与必要推理：不整段粘工具输出、命令回显、日志或文件内容，要引用只写结论与路径。',
 ].join('\n');
 
 /** 投影注册表是宿主半的核心目的；缺了它这个 fiber 就保持挂起。 */
