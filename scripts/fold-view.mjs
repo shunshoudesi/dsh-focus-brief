@@ -107,6 +107,18 @@ let biggestTurn = 0;
 let duplicateFiles = 0;
 /** 闸门：结论建议不许重复「需要你确认」/「风险提醒」里已经列出的条目（同屏重复）。 */
 let crossBlockDup = 0;
+/**
+ * 「尽量保证在两行」的观测：按卡片真实排版折算，有多少轮的结论超过两行。
+ * 与客户端 `estimateLines` 同口径（44 个全角字/行，半角算半个字宽）——契约里写「60 字内」，
+ * 超了**不裁**，只在卡片上提示一句；这个数字就是「提示会出现多少次」的预期值。
+ */
+const LINE_WIDTH = 44;
+function linesOfHeadline(text) {
+  const half = (text.match(/[\x20-\x7f]/g) ?? []).length;
+  return Math.max(1, Math.ceil((text.length - half + half / 2) / LINE_WIDTH));
+}
+let headlineOver2 = 0;
+const headlineLines = new Map();
 /** 闸门：工具说明里不该夹着工具标记语言；工具名不该还是原始 snake_case。 */
 let markupNotes = 0;
 let rawLabels = 0;
@@ -267,6 +279,12 @@ for (const file of files) {
     }
     if (turn.prompt === '') emptyPrompt++;
     if ((turn.promptMedia ?? 0) > 0) mediaPrompts++;
+    // 「尽量两行」的实测：只数有正文的轮次（没有结论行的轮次不参与）。
+    if (turn.headline !== '') {
+      const lines = Math.min(6, linesOfHeadline(turn.headline));
+      headlineLines.set(lines, (headlineLines.get(lines) ?? 0) + 1);
+      if (lines > 2) headlineOver2++;
+    }
     // 契约遵守度：直接从**这一轮的原文**里数段头（原文在 state 里，wire 里那份全文只有最近 8 轮）。
     {
       const raw = state.turns[index]?.answer ?? '';
@@ -329,6 +347,9 @@ console.log(`段名写得不精确的标题 ${malformedHeads.length} 处｜同�
 for (const text of malformedHeads) console.log(`  · 段名不精确的标题：${JSON.stringify(text)}（不算段头，内容落回正文）`);
 console.log(`有契约标题的轮次 ${titleFromContract} / ${turns}（拿不到就显示「第 N 轮」——提问已经原样摆在卡片上方，不再从提问抽标题）｜有正文但结论行抽不出 ${headlineEmpty} 轮`);
 console.log(`总卡标题与提问重复的轮次 ${titleDup} 轮（回归闸门：应为 0——提问已经单独摆出来了）`);
+console.log(
+  `结论行超过两行的轮次 ${headlineOver2} 轮（按 ${LINE_WIDTH} 全角字/行折算；行数分布 ${[...headlineLines.entries()].sort((a, b) => a[0] - b[0]).map(([line, n]) => `${line === 6 ? '6+' : line}行=${n}`).join('  ')}）——超了不裁，只在卡片上提示一句`,
+);
 console.log(`关键数据块 ${kpiTurns} 轮 | 风险块 ${riskTurns} 轮 | 产出文件块 ${fileTurns} 轮 | 提问以问号结尾 ${questions} 轮`);
 console.log(`最大投影值 ${biggest.bytes} 字节（${path.basename(path.dirname(biggest.file))}）`);
 console.log(`同会话 v1 投影最大值 ${biggestBrief.bytes} 字节`);

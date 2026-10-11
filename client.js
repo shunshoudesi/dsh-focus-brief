@@ -57,6 +57,7 @@ window.__ModuleLoader__.load({
       'card.countPoints': '要点 {count}',
       'card.countAsks': '待定 {count}',
       'card.empty': '（本轮没有正文可提炼）',
+      'card.headlineLines': '这一句较长（约 {count} 行）——让助手把第一段收到 60 字内更清爽',
       'card.fullOpen': '展开回答全文 {count} 字',
       'card.fullClose': '收起全文',
       'card.askMedia': '（你发来 {count} 个附件，没有文字）',
@@ -110,6 +111,7 @@ window.__ModuleLoader__.load({
       'card.countPoints': '{count} points',
       'card.countAsks': '{count} to decide',
       'card.empty': '(No prose to distill in this turn)',
+      'card.headlineLines': 'This line is long (~{count} lines) — ask for a first paragraph under 60 chars',
       'card.fullOpen': 'Show the full answer ({count} chars)',
       'card.fullClose': 'Collapse the answer',
       'card.askMedia': '({count} attachment(s), no text)',
@@ -606,6 +608,28 @@ function scrollDecision(state) {
   return state.rectBottom <= state.viewportHeight + 1 ? 'none' : 'ancestor';
 }
 
+/**
+ * 那句结论大约占几行。
+ *
+ * 为什么要估：用户的要求是「尽量保证在两行」，同时又要求这一段**不设字符上限**
+ * （裁会无声吃掉内容）。两条一起满足的唯一办法是让模型把第一段写短，于是契约里写了「60 字内」，
+ * 而这里给出**上屏后的即时反馈**——比两行长了就明说一句「这一句较长（约 N 行）」，
+ * 而不是把它裁掉。反馈既是给「下一次让助手收短」的信号，也让「为什么这块看着变长了」有个解释。
+ *
+ * 估法：卡片里那句结论是 15px、`overflow-wrap:anywhere`，一行的容宽约 44 个全角字
+ * （720px 上限的卡片、两边 16px 内边距、15px 字号）；半角字符按半个字宽算。
+ * 这是**估算**：字号、字体、卡片宽度任何一项变了都会漂，所以文案写「约」，
+ * 而且只用它决定「要不要提一句」，不做任何裁切。
+ */
+function estimateLines(text) {
+  const half = (text.match(/[\x20-\x7f]/g) ?? []).length;
+  const width = text.length - half + half / 2;
+  return Math.max(1, Math.ceil(width / 44));
+}
+
+/** 超过两行才提示（两行是目标，不是上限）。 */
+const HEADLINE_LINE_TARGET = 2;
+
 /** 一个带小标题的内容块。 */
     function Block(label, node) {
       return h('div', { className: 'dfb-block', key: label }, h('div', { className: 'dfb-label' }, label), node);
@@ -894,6 +918,10 @@ function scrollDecision(state) {
         showFull
           ? h('div', { className: 'dfv-full' }, markdownNodes(full))
           : h('div', { className: 'dfv-value', 'data-empty': headline === '' ? 'true' : 'false' }, headline === '' ? t('card.empty') : headline),
+        // 目标两行、但**不裁**：比两行长了就明说一句（见 estimateLines 的注释）。
+        !showFull && headline !== '' && estimateLines(headline) > HEADLINE_LINE_TARGET
+          ? h('div', { className: 'dfv-full-hint' }, t('card.headlineLines', { count: estimateLines(headline) }))
+          : null,
         full === ''
           ? turn.fullGone === true
             ? h('div', { className: 'dfv-full-hint' }, t('card.fullGone'))

@@ -457,11 +457,13 @@ for (const turn of allTurns) {
         const expectedLetters = lettersOf(fullText.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1'));
         check(`${tag} 渲染出来的正文没有丢内容`, lettersOf(allText) >= expectedLetters * 0.9, `下界 ${Math.round(expectedLetters * 0.9)} 实得 ${lettersOf(allText)}`);
         // 展开时只画全文：全文本来就从那句结论开始，两处都画就是同屏重复。
-        check(`${tag} 展开全文时不该再画那句结论`, !html.includes('dfv-value'));
+        // 断言查的是**类属性**，不是裸词：会变的字符串住在类名里，而「约 N 行」那句提示的文案
+// 恰恰写着「…超过 dfv-value 的两行…」——拿裸词查会把提示文字当成结论在画（这条断言这么误报过一次）。
+        check(`${tag} 展开全文时不该再画那句结论`, !html.includes('class="dfv-value"'));
         check(`${tag} 展开全文时应给「收起全文」`, html.includes(zh['card.fullClose']));
       } else {
         check(`${tag} 未展开时应给「展开回答全文」`, html.includes(zh['card.fullOpen'].replace('{count}', String(fullText.length))));
-        check(`${tag} 未展开时应只有那句结论`, html.includes('dfv-value') && !html.includes('class="dfv-full"'));
+        check(`${tag} 未展开时应只有那句结论`, html.includes('class="dfv-value"') && !html.includes('class="dfv-full"'));
         // 闸门：**结论那一行不许被截断**（用户要求「这个部分不设字符上限」）。
         // 两条都要有，因为历史上这里有两道裁切：
         // ① 宿主的字符上限（结论超过上限会带「…」）——这里断言渲染出来的那段结论是**原样的完整内容**；
@@ -475,6 +477,16 @@ for (const turn of allTurns) {
           const valueHtml = valueAt < 0 ? '' : html.slice(valueAt, valueEnd < 0 ? valueAt + 400 : valueEnd);
           const plainValue = valueHtml.replace(/<[^>]*>/g, '');
           check(`${tag} 结论行渲染的是完整内容（没被字符上限裁断）`, plainValue.includes(escapeHtml(turn.headline)), turn.headline.slice(0, 40));
+          // 「尽量两行」的落地方式是**提示**而不是裁切：超两行时明说约几行，且只说一次。
+          // 这里用与客户端同一个口径（44 全角字/行）算期望值。
+          const half = (turn.headline.match(/[\x20-\x7f]/g) ?? []).length;
+          const expectedLines = Math.max(1, Math.ceil((turn.headline.length - half + half / 2) / 44));
+          if (expectedLines > 2) {
+            const text = zh['card.headlineLines'].replace('{count}', String(expectedLines));
+            check(`${tag} 结论超两行时应提示约几行`, html.includes(text), text);
+          } else {
+            check(`${tag} 结论在两行内时不该提示`, !html.includes(zh['card.headlineLines'].split('——')[0]));
+          }
         }
       }
     } else {

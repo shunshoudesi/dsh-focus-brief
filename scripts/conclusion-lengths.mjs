@@ -28,6 +28,8 @@ const walk = (dir) => {
 walk(root);
 
 const lengths = [];
+/** 每条回答的第一段原文也留着：折算行数要看半角/全角，不能只看字数。 */
+const rawAnswers = [];
 for (const file of files) {
   let current = '';
   for (const event of readSessionEvents(file)) {
@@ -41,7 +43,9 @@ for (const file of files) {
       const body = current.replace(/^[ \t]*(?:【本轮】|\[本轮\]|本轮[：:]).*\n/, '');
       const part = body.split(/\n{2,}/).find((piece) => piece.trim() !== '' && !piece.trim().startsWith('|') && !/^#{1,6}\s+\S/.test(piece.trim()));
       if (part === undefined) continue;
-      lengths.push(part.trim().replace(/\s+/g, ' ').length);
+      const first = part.trim().replace(/\s+/g, ' ');
+      lengths.push(first.length);
+      rawAnswers.push({ first });
       current = '';
     }
   }
@@ -55,3 +59,27 @@ for (const cap of [200, 300, 400, 600, 800]) {
   const cut = lengths.filter((len) => len > cap).length;
   console.log(`上限 ${cap}：会被裁断 ${cut} 条（${(cut / lengths.length * 100).toFixed(1)}%）`);
 }
+
+/**
+ * 「尽量保证在两行」这条要求的取数：把每条结论按卡片上的真实排版折成行数。
+ *
+ * 容宽是拿截图校出来的：卡片一句 126 字的结论在真实浏览器里排成三行（`.tmp/shots/case-conclusion-longest.png`
+ * 里 291 字那条排五行），也就是一行约 42~58 个全角字。这里取 **44 个全角字/行** 当保守值
+ * （半角按半个字宽），于是「两行」≈ 88 字——与契约里写的「控制在 60 字内」留了约 30% 余量。
+ */
+const LINE_WIDTH = 44;
+function linesOf(text) {
+  const half = (text.match(/[\x20-\x7f]/g) ?? []).length;
+  const width = text.length - half + half / 2;
+  return Math.max(1, Math.ceil(width / LINE_WIDTH));
+}
+const lineHist = new Map();
+let over2 = 0;
+for (const raw of rawAnswers) {
+  const lines = Math.min(6, linesOf(raw.first));
+  lineHist.set(lines, (lineHist.get(lines) ?? 0) + 1);
+  if (lines > 2) over2++;
+}
+console.log('');
+console.log(`按 ${LINE_WIDTH} 全角字/行折算的行数分布：${[...lineHist.entries()].sort((a, b) => a[0] - b[0]).map(([line, n]) => `${line === 6 ? '6+' : line}行=${n}`).join('  ')}`);
+console.log(`超过两行的 ${over2} 条（${(over2 / lengths.length * 100).toFixed(1)}%）——契约里写「60 字内」，超了不裁，只在卡片上提示一句`);
