@@ -1,13 +1,18 @@
-# 专注视图 Focus View
+# 专注视图 Focus View · 实现与验证手册
+
+> 仓库首页那份 [`README.md`](README.md) 是「这是什么、怎么装、结构长什么样」；
+> 这一份是**实现与验证**的全部细节：卡片结构、契约与解析器、每一条规则和它的实测数字、
+> 全部回归闸门、已知边界、验收清单。**整个仓库就是这一个插件**（2026-10 提成仓库根，
+> 脚本一律从仓库根执行：`node scripts/<name>.mjs`）。
 
 DSH 桌面端的本地插件。解决的问题：助手的长回答里，真正要你注意的东西找不到，中段还混着工具调用和过程噪声。
 
 它做两件事：
 
 1. **注册一个平行会话视图「专注」**（v2，主角）。切过去之后，官方那套「一行行」的渲染完全不再出现，整页变成**每一轮一张结果卡**：卡片上方是你输入的原话，卡片里是状态与标题、一句话结论（点开换全文）、可展开的信息块。
-2. **普通对话视图里的一张折叠重点卡片**（v1，兜底），外加一条**回答格式约定**（固定标题行 + 结论先行 + 不粘日志）。
+2. **普通对话视图里的一张折叠重点卡片**（v1，兜底），外加一条**回答格式契约**（标题行 + 第一段结论 + 四个固定段名，本地按同一份规格解析）。
 
-数据全部来自会话事件与本地提炼，**不额外调用模型**；不写任何新会话事件，不读别的插件的 DOM；除 `react` 外不 require 任何包，没有第三方依赖。
+数据全部来自会话事件与本地解析，**不额外调用模型**；不写任何新会话事件，不读别的插件的 DOM；除 `react` 外不 require 任何包，没有第三方依赖。
 
 ## 切到「专注」视图
 
@@ -92,7 +97,7 @@ DSH 桌面端的本地插件。解决的问题：助手的长回答里，真正�
 | ~~执行过程~~ | 真实事件 `tool/call` + `tool/result` | **已从卡片上移除**（用户要求「不要执行日志」） |
 | ~~原始记录~~ | 真实事件 | **已从卡片上移除**（用户要求「去掉原始记录模块」）；wire 里那份行数组也不再送 |
 
-**为什么不再用关键词猜段**：在 15 个会话 / 370 条真实回答上数过（`.tmp/section-census.mjs`）——
+**为什么不再用关键词猜段**：在 15 个会话 / 370 条真实回答上数过（`.tmp/section-census.mjs` + `.tmp/section-strictness.mjs`，两遍普查，都在 `.tmp/` 里当证据留着、不入库）——
 82% 的回答有小标题，但标题文本极度自由（「一句话回答你」18 次、「验证」15 次、「验收」8 次…），
 按关键词归类最多命中 **29%**（结论），风险段只命中 **7%**，而且那 7% 里混着解释性文字。
 把段名写进契约之后，本地才有一个可靠的接口可以读；代价是老轮次（契约之前写的）没有那些段，
@@ -184,9 +189,14 @@ SSR 逐条核对结构数量、不许残留源码标记、开头/中间/结尾�
 
 整屏渲染开销（最大的那个 30 轮会话 / 1452 次工具调用）：默认态 **64 KB HTML / 1110 个元素**，全部展开 65 KB / 1143，连回答全文一起展开 87 KB / 1625。信息块内容和回答全文都是**按需渲染**的（收起时根本不进 DOM），这就是默认态只有最坏情况三分之二的原因。
 
-## 样式：实底白卡（照 `竖版堆叠.html`）
+## 样式：实底白卡（照设计稿）
 
 结构照设计稿：**实底卡面 + 发丝边 + 轻投影 + 16px 圆角**，信息块收起时用负边距叠压成一摞（底下再垫两层缩窄的「纸边」），展开后纵向排开。
+
+> 设计稿原文件是 `竖版堆叠.html`（用户给的 mockup，「总卡 + 堆叠信息块」）。2026-10 那次结构调整里
+> 它按用户的意思**删掉了**（不再是活文档：卡片的实现与验证都以 `client.js` + 预览页为准）。
+> 需要翻旧账时它在 git 历史里：`git show 58881f6:dsh-focus-brief/竖版堆叠.html > 竖版堆叠.html`
+> （那条历史路径是提成仓库根**之前**的样子）。
 
 - **没做成毛玻璃**：这是你选的方向（「完全照 mockup 的实底白卡」）。v1 那张小卡的毛玻璃样式还在，两套前缀不同、互不影响。
 - **面与文字全部落在主题 token 上**，所以深色主题自动成立。实测浅色主题下 `bg-layer-1` / `bg-layer-2` / `bg-base` **全是 `#ffffff`**，卡片与页面同色——所以卡的分层靠发丝边 + 投影，卡内分区靠 `color-mix` 掺 4% 文字色（得到 `#f5f5f6`）。
@@ -233,14 +243,14 @@ SSR 逐条核对结构数量、不许残留源码标记、开头/中间/结尾�
 同目录下的 [`preview.html`](preview.html) 是一份**自带脚本的静态预览**：数据是真的（5 轮真实轮次，覆盖「信息块最多（3 块，会叠成一摞）」/「2 块直接铺开」/「完成 · 待你定 N」/「无信息块退化（中断）」四种），配色是 DSH 主题的**真实 token 取值**（含提问气泡用的 `--dsw-specific-bubble` 与 `--dsw-radius-xl`，是从主题包里抄的真值，不是兜底值），样式是插件实际注入的那段 CSS（一字未改）。双击就能在浏览器里打开，两个开关：
 
 - **主题**：深色 / 浅色一键切（一眼看两套主题下都成立）；
-- **页面底色**：在「白」（= DSH 浅色主题的实际情况）与「灰 `#f0f0f0`」（= `竖版堆叠.html` 那份 mockup 的做法）之间切——这就是那个一直悬着的决定的对照：卡片的发丝边对**白**页面底只有 1.26:1，对灰页面底就好得多。
+- **页面底色**：在「白」（= DSH 浅色主题的实际情况）与「灰 `#f0f0f0`」（= 设计稿 mockup 的做法）之间切——这就是那个一直悬着的决定的对照：卡片的发丝边对**白**页面底只有 1.26:1，对灰页面底就好得多。
 
 它按顺序排了每轮的**三种**状态：① 点「展开回答全文」后（**回答区里换成全文**，markdown 渲染成元素）② 默认（**块数 >2 才叠成一摞；只有 1~2 块就直接铺开，说明文字会随块数变**）③ 点「展开 N 个信息块」后（纵向手风琴）④ 点开「原始记录 N 条」后。**三种状态都带着上方那条「你输入的原话」气泡**。它和真身只差三样：字体回退、外壳的列宽、输入框区域。
 
 ## 安装与生效
 
 ```
-plugin_manager { action: "install_bundle", target: "<本目录绝对路径>" }
+plugin_manager { action: "install_bundle", target: "<本仓库根的绝对路径>" }
 ```
 
 官方的 `install_bundle` 会自己完成包安装、bundle 注册和 patch 挂载 —— **不要**手改 profile 的 `package.json` 或 `cordis.patch.yml`。
@@ -268,15 +278,15 @@ plugin_manager { action: "install_bundle", target: "<本目录绝对路径>" }
 验证脚本就在 [`scripts/`](scripts/) 里（**不是**临时目录里的东西），在**仓库根目录**执行：
 
 ```
-node dsh-focus-brief/scripts/fetch-assets.mjs   # 一次性：备好辅助资产
-node dsh-focus-brief/scripts/parser-cases.mjs
-node dsh-focus-brief/scripts/fold-view.mjs
-node dsh-focus-brief/scripts/ssr-view.mjs
-node dsh-focus-brief/scripts/css-parse-check.mjs
-node dsh-focus-brief/scripts/css-check.mjs
-node dsh-focus-brief/scripts/contrast-check.mjs
-node dsh-focus-brief/scripts/verify-view.mjs
-node dsh-focus-brief/scripts/verify-preview.mjs
+node scripts/fetch-assets.mjs   # 一次性：备好辅助资产
+node scripts/parser-cases.mjs
+node scripts/fold-view.mjs
+node scripts/ssr-view.mjs
+node scripts/css-parse-check.mjs
+node scripts/css-check.mjs
+node scripts/contrast-check.mjs
+node scripts/verify-view.mjs
+node scripts/verify-preview.mjs
 ```
 
 辅助资产（React 的 UMD 构建、css-tree 的浏览器构建、从 DSH 的 `app.asar` 里抽出来的主题包与客户端包 README）体积大、且是下载/抽取来的，所以**不进版本库**，统一放在 `.tmp/` 下；`fetch-assets.mjs` 一次备好（asar 路径可用 `DSH_ASAR` 覆盖——安装目录改名过一次，`D:\DSH` → `D:\deepseekherness`）。缺资产时脚本不抛 ENOENT，而是直接告诉你跑哪条命令。
@@ -357,3 +367,8 @@ node dsh-focus-brief/scripts/verify-preview.mjs
 - **改 state 字段或折叠语义必须递增 `stateVersion`**（v1 = **5**，v2 = **7**：v2 = 工具名美化 + 产出文件过滤，v3 = 产出文件改存去重键 `key` 与完整路径，v4 = 工具名美化扩到 snake_case + 说明挡掉标记语言，v5 = **去掉「执行过程」块**，v6 = **新增 `promptMedia`**，v7 = **契约解析器**；**去掉原始记录只改了 wire**（少送 `raw`/`rawTotal`/`rawOmitted`，改送 `full`/`fullGone`），所以当时**没有**递增；**v5 与 v7 这两次同样是「state 里存的东西没变、只是 wire 的算法换了」**，递增的唯一目的是让 `verify-view.mjs` 能把「宿主还在跑旧代码」报出来，见上文），否则同名旧检查点会喂进错误的状态形状；**只改 `wire.view` 里的提炼规则按规矩不需要递增**——检查点存的是 state，视图由 state 现算。
 - **依赖 `turn/start` 事件划定轮次边界**：循环在每轮提示之前必定先记 `turn/start`，所以「挂在最新轮次上」是安全的；重试用同一个轮次号重发 `turn/start` 时保持已有条目不动。
 - 本机 `ui-chat.transcriptView` 当前是 `standard`：Chat 自带的「工作详情」在那档已经会折叠已完成轮次的过程，但它不会把重点提到最上面——那正是这个视图补的位置。
+
+
+
+
+

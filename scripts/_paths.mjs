@@ -9,19 +9,23 @@
  *
  * 这些脚本都假定**在仓库根目录**执行（产物路径按仓库根写死），例如：
  *
- *   node dsh-focus-brief/scripts/fold-view.mjs
+ *   node scripts/fold-view.mjs
  */
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-/** 仓库根（本文件在 <repo>/dsh-focus-brief/scripts/ 下）。 */
-export const ROOT = fileURLToPath(new URL('../../', import.meta.url));
+/**
+ * 仓库根 = 插件根（本文件在 <repo>/scripts/ 下）。
+ * 2026-10 那次结构调整把 `dsh-focus-brief/` 从子目录提成了仓库根，所以这里是 `../` 而不是 `../../`，
+ * 下面几个产物路径也去掉了 `dsh-focus-brief/` 前缀。
+ */
+export const ROOT = fileURLToPath(new URL('../', import.meta.url));
 export const TEMP = `${ROOT}.tmp/`;
 export const REACT_DIR = `${TEMP}react/`;
 export const CSS_PARSER_DIR = `${TEMP}css-parser/`;
 export const ASAR_REF = `${TEMP}asar-ref/`;
-export const PREVIEW = `${ROOT}dsh-focus-brief/preview.html`;
-export const PLUGIN_DIR = `${ROOT}dsh-focus-brief/`;
+export const PREVIEW = `${ROOT}preview.html`;
+export const PLUGIN_DIR = ROOT;
 
 /** 本机 DSH 的安装路径（asar 在这里；`D:\DSH` 那套已随安装目录改名废弃）。 */
 export const DEFAULT_ASAR = 'D:\\deepseekherness\\resources\\app.asar';
