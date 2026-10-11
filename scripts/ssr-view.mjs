@@ -2,7 +2,8 @@
  * 一次性端到端验证：真 React（开发版，会报告警）+ 真实会话折叠数据 → 真渲染成 HTML。
  *
  * 覆盖两层：
- * 1. 真实语料：14 个会话、200+ 轮，每轮 4 种交互状态（叠压 / 展开 / 单块折叠 / 展开全部 / 展开回答全文）。
+ * 1. 真实语料：14 个会话、200+ 轮，每轮 5 种交互状态（叠压 / 展开整摞但每块仍收起 / 点开一块 /
+ *    点开两块并显示全部项 / 展开回答全文）。
  * 2. 合成边界：没有信息块、只有 1~2 块、5 块、四种状态、更早的轮次没有全文、正文被截断、超长与怪异字符，
  *    以及「旧宿主还在推执行过程块」这一种过渡态。
  *
@@ -279,9 +280,10 @@ console.log(`待渲染轮次：真实 ${realTurns.length} + 合成 ${synthetic.l
 
 const queues = [
   ['叠压（默认）', [false, {}, {}, false]],
-  ['展开整摞', [true, {}, {}, false]],
-  ['单块折叠', [true, { points: true }, {}, false]],
-  ['展开全部项', [true, {}, { points: true, files: true }, false]],
+  // 关键新契约：展开整摞**只铺开标题行**，每块内容仍是收起的（要点那一块才进 DOM）。
+  ['展开整摞（每块仍收起）', [true, {}, {}, false]],
+  ['展开整摞 + 点开 points', [true, { points: true }, {}, false]],
+  ['展开整摞 + 点开 points/files 且显示全部项', [true, { points: true, files: true }, { points: true, files: true }, false]],
   // 第 4 个 useState 是「展开回答全文」——原始记录模块删掉之后，它是最后一个开关。
   ['展开回答全文', [true, {}, {}, true]],
 ];
@@ -314,9 +316,23 @@ for (const turn of allTurns) {
     const blocks = (Array.isArray(turn.blocks) ? turn.blocks : []).filter((block) => BLOCK_ALLOW.has(block.id));
     const fanned = turn.state !== 'done' || blocks.length <= 2;
     const open = queue[0] === true || fanned;
-    // 四个开关的下标：deckOpen=0 / closed=1 / showAll=2 / fullOpen=3（原始记录删掉后它是最后一个）。
+    // 四个开关的下标：deckOpen=0 / opened=1 / showAll=2 / fullOpen=3（原始记录删掉后它是最后一个）。
+    // opened 是**白名单**（哪几块被点开），不是黑名单——展开整摞 ≠ 展开内容。
     const fullOpen = queue[3] === true;
-    check(`${tag} 折叠态不应渲染正文`, !(open === false && html.includes('dfv-body')));
+    const openedMap = queue[1] ?? {};
+    const openIds = blocks.filter((block) => openedMap[block.id] === true).map((block) => block.id);
+    // 这条是整个视图「看得清、轻」的核心规则，正反两面都要盯住：
+    // ① 整摞收起时一块内容都不许进 DOM；② 展开整摞后**也只有**点开过的那几块进 DOM。
+    const bodies = (html.match(/class="dfv-body"/g) ?? []).length;
+    const expectedBodies = open === true ? openIds.length : 0;
+    check(`${tag} 只有点开过的块才渲染内容（展开整摞不展开内容）`, bodies === expectedBodies, `期望 ${expectedBodies} 块 实得 ${bodies} 块`);
+    // 开合状态不能只靠箭头转角（读屏和键盘用户看不见）：每一行都要把 aria-expanded 写对。
+    const rowFlags = [...html.matchAll(/class="dfv-row"[^>]*aria-expanded="(true|false)"/g)].map((match) => match[1] === 'true');
+    check(
+      `${tag} 每行的 aria-expanded 跟着开合状态走`,
+      rowFlags.length === blocks.length && rowFlags.filter(Boolean).length === expectedBodies,
+      `${rowFlags.filter(Boolean).length}/${rowFlags.length} 开，期望 ${expectedBodies}/${blocks.length}`,
+    );
     if (blocks.length > 0) check(`${tag} 展开态应有标题行`, html.includes('dfv-row'));
     if (blocks.length > 0) {
       check(`${tag} 每块都有图标', `, (html.match(/dfv-ico/g) ?? []).length >= blocks.length);
@@ -551,13 +567,13 @@ check('不同理由要保留（中断 · 已中止）', otherHtml.includes(`${zh
 // 字典里连这个块名都不该再存在（少了它，宿主万一还推 steps 也不会翻译出一个「执行过程」标题）。
 check('字典里不该再有「执行过程」这个块名', !('block.steps' in zh) && !('count.steps' in zh));
 const oldHost = synthetic.find((turn) => turn.turn === 910);
-const oldHostHtml = await renderView([oldHost], [true, {}, {}, false], true);
+const oldHostHtml = await renderView([oldHost], [true, { points: true }, {}, false], true);
 check(
   '旧宿主推来的执行过程块应当整块消失在卡片上',
   !oldHostHtml.includes('browser_click') && !oldHostHtml.includes('dfv-step') && !oldHostHtml.includes('data-id="steps"'),
 );
-// 关键：丢的是那一块，不是整张卡——正文块必须还在。
-check('丢掉执行日志之后，同一轮的正文块仍然渲染', oldHostHtml.includes('日志之外的正文还在') && oldHostHtml.includes('dfv-point'));
+// 关键：丢的是那一块，不是整张卡——正文块必须还在（它被点开了，所以内容要进 DOM）。
+check('丢掉执行日志之后，同一轮的正文块仍然渲染', oldHostHtml.includes('日志之外的正文还在') && oldHostHtml.includes('class="dfv-point"'));
 // 也不留空壳（不许出现「展开 0 个信息块」这种废话）。
 check(
   '执行日志块不占位、不生成空壳',

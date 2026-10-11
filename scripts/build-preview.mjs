@@ -196,13 +196,20 @@ async function renderTurns(turns, perCard) {
 
 const sections = [];
 for (const turn of picked) {
+  // 这一轮第一个信息块的 id：④ 那一格要「只点开它」。
+  const firstBlock = turn.blocks[0]?.id;
+  const openFirst = firstBlock === undefined ? {} : { [firstBlock]: true };
   const deck = await renderTurns([turn], [false, {}, {}, false]);
+  // ③ 只点「展开 N 个信息块」：opened 传空表 → N 个标题行铺开、每块内容都不进 DOM。
   const expanded = await renderTurns([turn], [true, {}, {}, false]);
+  // ④ 展开整摞之后再点开**其中一块**：`opened` 是白名单，所以只把这一块 id 放进去。
+  const oneOpen = await renderTurns([turn], [true, openFirst, {}, false]);
   // 第 4 个 useState 是「展开回答全文」——原始记录模块删掉之后它是最后一个开关。
   const answerFull = await renderTurns([turn], [true, {}, {}, true]);
   const title = turn.title === '' ? `第 ${turn.turn} 轮` : turn.title;
   // >2 块才叠成一摞；1~2 块按设计直接铺开，两种形态的说明必须分开写，不然会让人以为抖不出叠压效果。
   const deckTag = turn.blocks.length > 2 ? '② 默认：信息块叠压成一摞' : `② 默认：只有 ${turn.blocks.length} 个块，直接铺开（不叠）`;
+  const openTag = firstBlock === undefined ? '④ 这一轮没有信息块可点开' : `④ 再点开其中一块（${escapeHtml(zh[`block.${firstBlock}`] ?? firstBlock)}）：只有它把内容铺出来`;
   const hasAnswer = turn.full !== '';
   sections.push(`
   <section class="pv-section">
@@ -210,7 +217,8 @@ for (const turn of picked) {
     <div class="pv-pair">
       <div><div class="pv-tag">① 点「展开回答全文」：回答区里换成全文${hasAnswer ? '' : '（这一轮没有全文可展开，这个按钮不出现）'}</div>${answerFull}</div>
       <div><div class="pv-tag">${deckTag}</div>${deck}</div>
-      <div><div class="pv-tag">③ 点「展开 N 个信息块」后：纵向手风琴</div>${expanded}</div>
+      <div><div class="pv-tag">③ 点「展开 N 个信息块」后：<b>只铺开 N 个标题行，每块内容仍然收起</b>（内容按需进 DOM）</div>${expanded}</div>
+      <div><div class="pv-tag">${openTag}</div>${oneOpen}</div>
     </div>
   </section>`);
 }
@@ -270,7 +278,9 @@ ${sections.join('\n')}
   <b>看什么：</b>① <b>你输入的原话</b>就在每轮卡片上方那条蓝底黑字气泡里（官方气泡自己的 token，一字不改）；
   ② 卡片里是<b>回答</b>：默认一句话结论，点「展开回答全文」换成全文（markdown 渲染成元素，不是源码）；
   ③ 信息块超过 2 个时那一摞有没有「叠在一起」的感觉（层间只叠 6px，底下两层缩窄的纸边）；
-  ④ 卡片边界在<b>白页面</b>下是否糊在背景里（实测发丝边对页面底只有 1.26:1，按上面的按钮自己比）。
+  ④ <b>点一下「展开 N 个信息块」到底展开了什么</b>：只铺开 N 个标题行，每块内容仍是收起的，
+  再点那一块（④ 那格）才把它的内容放进 DOM——每块内容都是按需渲染的，不点就不进页面；
+  ⑤ 卡片边界在<b>白页面</b>下是否糊在背景里（实测发丝边对页面底只有 1.26:1，按上面的按钮自己比）。
   <br>卡片上<b>没有执行日志、也没有原始记录模块</b>：工具调用时间线在官方「轨迹」视图里；回答全文就在这块卡片上。
 </div>
 <script>
@@ -310,7 +320,7 @@ function globalsCssSafe(scope, extra) {
 const out = PREVIEW;
 fs.writeFileSync(out, html, 'utf8');
 const kb = Math.round(fs.statSync(out).size / 1024);
-console.log(`写出 ${out}：${kb} KB，${picked.length} 轮 × 3 种状态，CSS ${injected.length} 字符`);
+console.log(`写出 ${out}：${kb} KB，${picked.length} 轮 × 4 种状态，CSS ${injected.length} 字符`);
 // 轮次里带上「这轮有没有写契约段」——履历里绝大部分轮次是契约之前写的，
 // 不打这个标记的话，看到「块 0」会以为是解析器坏了。
 const contractMark = (turn) => {

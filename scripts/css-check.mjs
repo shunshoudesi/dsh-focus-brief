@@ -148,6 +148,8 @@ const must = [
   ['v2 状态点分色', /\.dfv-dot\[data-state="wait"\]\{background-color:var\(--dsw-alias-state-warn-primary\)\}/],
   ['v2 卡片圆角 16px（设计稿）', /\.dfv-card\{[^}]*border-radius:16px/],
   ['v2 键盘焦点可见', /\.dfv-row:focus-visible\{outline:2px solid/],
+  // 每块的内容是「点开才出」，所以**箭头就是这一行唯一的开合信号**：展开的那一块箭头必须转下来。
+  ['v2 展开的那一块箭头转下来（唯一开合信号）', /\.dfv-block\[data-closed="false"\] \.dfv-arrow\{transform:rotate\(90deg\)\}/],
   ['v2 根容器自带滚动', /\.dfv-root\{[^}]*overflow-y:auto/],
   // 滚轮失效那个真坑：外壳把视图放进一个「自己就是滚动容器」的 flex 纵向容器里，
   // 视图若用 height:100% 就会变成「没有可滚内容却仍是滚动容器」的元素，

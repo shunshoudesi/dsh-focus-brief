@@ -62,13 +62,15 @@ const zh = dictionaries['focus-brief'].zh;
 const t = (key, params) =>
   (zh[key] ?? `MISSING:${key}`).replace(/\{(\w+)\}/g, (whole, name) => (params !== undefined && name in params ? String(params[name]) : whole));
 
-/** useState 垫片：整屏一次渲染时，hook 调用顺序 = 每张卡的 4 个状态依次排列。 */
-function shimmed(count, makeValue) {
+/** useState 垫片：整屏一次渲染时，hook 调用顺序 = 每张卡的 4 个状态依次排列。
+ *  `makeValue(卡序, 状态位, 该轮 wire)` 拿到那一轮，才能按**真实的块 id** 造「全点开」的表。 */
+function shimmed(turns, makeValue) {
   let index = 0;
   return {
     ...react,
     useState: (initial) => {
-      const value = makeValue(Math.floor(index / 4), index % 4) ?? initial;
+      const card = Math.floor(index / 4);
+      const value = makeValue(card, index % 4, turns[card]) ?? initial;
       index++;
       return [value, () => {}];
     },
@@ -76,7 +78,7 @@ function shimmed(count, makeValue) {
 }
 
 async function render(turns, makeValue, label) {
-  const shim = shimmed(turns.length, makeValue);
+  const shim = shimmed(turns, makeValue);
   let View = null;
   loaded
     .factory((name) => (name === 'react' ? shim : requireReact(name)))
@@ -115,10 +117,14 @@ for (const file of files.slice(0, 3)) {
   const turns = viewDefinition.wire.view(state);
   const tools = turns.reduce((sum, turn) => sum + (turn.counts?.tools ?? 0), 0);
   console.log(`\n会话 ${path.basename(path.dirname(file.full))}：${turns.length} 轮 / ${tools} 次工具调用`);
-  // 默认态：信息块收起（只有状态是 done 且块数 > 2 的才真的是收起态）。makeValue(卡序, 状态位) → 值。
+  // 「这一轮的所有块都点开」的白名单表（按真实块 id 造，不抄常量）。
+  const allOpen = (turn) => Object.fromEntries((turn?.blocks ?? []).map((block) => [block.id, true]));
+  // 默认态：信息块收起（只有状态是 done 且块数 > 2 的才真的是叠压态）。
   await render(turns, (card, slot) => (slot === 0 ? false : slot === 1 ? {} : slot === 2 ? {} : false), '默认（叠压）');
-  // 全部展开：每张卡都铺开，但回答全文仍关着（slot 3 必须显式 false——传 {} 是 truthy，会误开）。
-  await render(turns, (card, slot) => (slot === 0 ? true : slot === 3 ? false : {}), '全部展开');
+  // 新契约里点一下「展开 N 个信息块」得到的就是这个形态：标题行铺开、每块内容仍然不画。
+  await render(turns, (card, slot) => (slot === 0 ? true : slot === 3 ? false : {}), '铺开标题行（块收起）');
+  // 全部展开：每张卡都铺开**并逐块点开**（slot 3 必须显式 false——传 {} 是 truthy，会误开）。
+  await render(turns, (card, slot, turn) => (slot === 0 ? true : slot === 3 ? false : slot === 1 ? allOpen(turn) : {}), '每块都点开');
   // 连回答全文也展开：最坏情况（最近 8 轮会把整篇回答渲染成元素）。
-  await render(turns, (card, slot) => (slot === 0 || slot === 3 ? true : {}), '展开 + 回答全文');
+  await render(turns, (card, slot, turn) => (slot === 0 || slot === 3 ? true : slot === 1 ? allOpen(turn) : {}), '每块点开 + 回答全文');
 }

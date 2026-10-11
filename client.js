@@ -7,7 +7,8 @@
  * 2. `conversation.view` 的 `focus`（v2 专注视图）：注册一个平行视图，切过去之后
  *    官方那套一行行的画法完全不渲染，整页由「每一轮」组成——
  *    上方一条**你自己输入的原话**（官方那条蓝底黑字气泡，原样），下面一张结果卡
- *    （状态点 + 标题 + 白底回答区，点开换全文 + 一摞信息块，点开纵向手风琴）。
+ *    （状态点 + 标题 + 白底回答区，点开换全文 + 一摞信息块：展开整摞只铺开标题行，
+ *    每块的内容要再点那一块才出来）。
  *    卡片上**没有执行日志、也没有原始记录模块**：日志在官方「轨迹」视图里。
  *
  * 结构照 `竖版堆叠.html` 的设计：卡片是实底白面 + 发丝边 + 轻投影（不是毛玻璃），
@@ -240,7 +241,7 @@ window.__ModuleLoader__.load({
       '.dfv-full-toggle:hover{color:var(--dsw-alias-label-primary)}',
       '.dfv-full-toggle:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}',
 
-      /* ---------- 信息块：收起是叠压一摞，展开是纵向手风琴 ---------- */
+      /* ---------- 信息块：收起是叠压一摞，展开后纵向排开一列标题行（内容再点才出） ---------- */
       '.dfv-blocks{padding:10px 14px 14px;position:relative}',
       '.dfv-blocks[data-open="false"] .dfv-block{position:relative;border-radius:12px;background-color:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l2);box-shadow:0 2px 8px rgba(0,0,0,.09);margin-bottom:-6px;transition:transform .18s ease,box-shadow .18s ease}',
       '.dfv-blocks[data-open="false"] .dfv-block:last-of-type{margin-bottom:0}',
@@ -783,7 +784,7 @@ const HEADLINE_LINE_TARGET = 2;
     /* v2：专注视图                                                          */
     /* ==================================================================== */
 
-    /** 信息块的标题行。收起态点它是展开整摞，展开态点它是折叠/展开这一块（纵向手风琴）。 */
+    /** 信息块的标题行。收起态点它是展开整摞；展开态点它是把**这一块的内容**放出来／收回去。 */
     function BlockRow(props) {
       const { block, count, label, closed, onToggle } = props;
       return h(
@@ -886,7 +887,11 @@ const HEADLINE_LINE_TARGET = 2;
       const { turn } = props;
       const t = props.t;
       const [deckOpen, setDeckOpen] = React.useState(false);
-      const [closed, setClosed] = React.useState({});
+      // 每块**默认收起**，`opened` 记的是「哪几块被点开了」。展开整摞只把 N 个标题行铺开，
+      // 具体内容要再点那一块才进 DOM（用户 2026-10 的要求：「展开后默认里面的每个模块的详细信息
+      // 还是收起的，需要用户再次点击对应的模块才会展开」）。这条规则对 1~2 块（不叠）的轮次同样生效——
+      // 不留分支，只有一条规则。（前身是 `closed` 黑名单，语义正好相反：以前展开整摞 = 全部铺开。）
+      const [opened, setOpened] = React.useState({});
       const [showAll, setShowAll] = React.useState({});
       // 回答全文是否展开。**这个 hook 必须排在最后**：SSR 回归用「按下标返回固定值」的垫片驱动交互状态，
       // 加在末尾，前三个下标才对得上。
@@ -961,10 +966,11 @@ const HEADLINE_LINE_TARGET = 2;
         const count = items.length;
         const label = t(BLOCK_LABEL[block.id] ?? 'block.points');
         const countText = t(BLOCK_COUNT[block.id] ?? 'count.points', { count });
-        const isClosed = closed[block.id] === true;
+        const isOpen = opened[block.id] === true;
         // 内容按需渲染：收起时不进 DOM。一屏 30 轮的全量正文留在 DOM 里，
         // 与“看得清、轻”的目的正好相反。
-        const expanded = open && !isClosed;
+        // `open &&` 这一半不是多余的：整摞收起来时任何块的内容都不画，重新点开整摞时也回到全收起。
+        const expanded = open && isOpen;
         return h(
           'div',
           { className: 'dfv-block', 'data-closed': expanded ? 'false' : 'true', key: block.id },
@@ -974,7 +980,7 @@ const HEADLINE_LINE_TARGET = 2;
             count: countText,
             closed: !expanded,
             ariaLabel: t('a11y.block', { label, count: countText }),
-            onToggle: open ? () => setClosed((prev) => ({ ...prev, [block.id]: !isClosed })) : () => setDeckOpen(true),
+            onToggle: open ? () => setOpened((prev) => ({ ...prev, [block.id]: !isOpen })) : () => setDeckOpen(true),
           }),
           expanded
             ? h(BlockBody, {
@@ -1000,7 +1006,16 @@ const HEADLINE_LINE_TARGET = 2;
                 ? null
                 : h(
                     'button',
-                    { type: 'button', className: 'dfv-pill', onClick: () => setDeckOpen((value) => !value) },
+                    {
+                      type: 'button',
+                      className: 'dfv-pill',
+                      // 收起整摞时把「点开过哪几块」也清掉：下次展开又是 N 个收起的标题行，
+                      // 而不是把上次看过的内容原样倒回来（点开一块是「这次要看」，不是永久设置）。
+                      onClick: () => {
+                        if (deckOpen) setOpened({});
+                        setDeckOpen((value) => !value);
+                      },
+                    },
                     open ? t('card.collapseBlocks') : t('card.expandBlocks', { count: blocks.length }),
                   ),
             );

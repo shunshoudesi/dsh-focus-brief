@@ -47,12 +47,45 @@ for (const file of files) {
 const pick = (predicate) => pool.filter(predicate).at(-1) ?? null;
 const has = (turn, id) => (turn?.blocks ?? []).some((block) => block.id === id);
 
+/* 语料补一轮**合成**轮次：真实履历里「会叠成一摞」（完成态 + >2 块）的只有两轮，而且里面没有
+   `points`/`files` 这种内容厚的块，于是「展开整摞后每块仍收起 / 再点开其中一块」这两个新形态
+   在真实语料里**没有样本**（第一次跑就打印了「语料里没有样本」）。没有样本就没法亲眼验，
+   所以照投影 wire 的形状补一轮，专供这两个用例。注意它被 push 在最后，`pick` 取 `.at(-1)`——
+   任何它不满足的用例都不会被它顶掉。 */
+pool.push({
+  turn: 9001,
+  startSeq: 0,
+  time: Date.UTC(2026, 9, 10, 14, 30),
+  state: 'done',
+  stateReason: '',
+  decisions: 0,
+  title: '合成：四块一摞（验证展开后每块仍收起）',
+  headline: '这一轮的四个信息块都应该先以标题行出现，点哪块才出哪块的内容。',
+  prompt: '合成轮次：用来验证「展开整摞 ≠ 展开内容」。',
+  promptMedia: 0,
+  blocks: [
+    { id: 'asks', items: [{ text: '要不要把默认改成收起' }, { text: '圆点要不要留' }] },
+    { id: 'kpi', items: [{ k: '信息块', v: '4' }, { k: '默认收起', v: '4' }] },
+    { id: 'files', items: [{ path: 'dsh-focus-brief/client.js', name: 'client.js', dir: 'dsh-focus-brief', ext: 'JS' }, { path: 'dsh-focus-brief/index.js', name: 'index.js', dir: 'dsh-focus-brief', ext: 'JS' }] },
+    { id: 'points', items: [{ depth: 0, text: '点「展开 4 个信息块」只铺开标题行' }, { depth: 1, text: '再点这一块才把内容放进 DOM' }] },
+  ],
+  full: '',
+  fullGone: true,
+  truncated: false,
+  counts: { files: 2, tools: 0, kpi: 2, points: 2, risks: 0, asks: 2 },
+  steps: 0,
+  chars: 33,
+});
+
 const CASES = [
   ['answer-full', (turn) => (turn.full ?? '').length > 600, [true, {}, {}, true]],
   ['ask-only', (turn) => turn.prompt !== '' && (turn.blocks ?? []).length === 0, [false, {}, {}, false]],
   ['asks-risks', (turn) => has(turn, 'asks') && has(turn, 'risks'), [true, {}, {}, false]],
   ['decide-pill', (turn) => turn.state === 'done' && (turn.decisions ?? 0) > 0, [false, {}, {}, false]],
-  ['block-collapsed', (turn) => has(turn, 'points') && (turn.blocks ?? []).length >= 3, [true, { points: true }, {}, false]],
+  // 点一下「展开 N 个信息块」得到的形态：N 个标题行铺开、**每块内容仍然收起**（2026-10 的新契约）。
+  ['deck-open-rows', (turn) => (turn.blocks ?? []).length >= 3 && has(turn, 'points'), [true, {}, {}, false]],
+  // 再点开其中一块：只有那一块把内容铺出来。
+  ['block-open', (turn) => (turn.blocks ?? []).length >= 3 && has(turn, 'points'), [true, { points: true }, {}, false]],
   ['f2-no-blocks', (turn) => (turn.blocks ?? []).length === 0, [false, {}, {}, false]],
   ['interrupt', (turn) => turn.state === 'interrupt', [false, {}, {}, false]],
   // 结论最长的那一轮：专门用来看「结论那一行会不会被裁」。

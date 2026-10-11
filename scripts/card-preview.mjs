@@ -79,9 +79,16 @@ const zh = dictionaries['focus-brief'].zh;
 const t = (key, params) =>
   (zh[key] ?? `MISSING:${key}`).replace(/\{(\w+)\}/g, (whole, name) => (params !== undefined && name in params ? String(params[name]) : whole));
 
+/**
+ * 「每一块都点开」的标记：客户端的 `opened` 只看 `opened[block.id] === true`，
+ * 所以一个对任何键都答 true 的 Proxy 就等于「N 块全开」，不用把块 id 抄一遍（抄了会漂移）。
+ * （2026-10 起「展开整摞」不再等于「展开内容」，这里要的是后者。）
+ */
+const ALL_OPEN = new Proxy({}, { get: (target, key) => (key === 'toString' ? () => 'ALL_OPEN' : true) });
+
 /** 固定展开态：每块内容都可见（--full 时连回答全文一起打开）。 */
 function shimmed() {
-  const queue = [true, {}, {}, withFull];
+  const queue = [true, ALL_OPEN, {}, withFull];
   let index = 0;
   const shim = { ...react, useState: (initial) => [index < queue.length ? queue[index++] : initial, () => {}] };
   let View = null;
